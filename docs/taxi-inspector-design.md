@@ -8,8 +8,8 @@ The app is an independent estimate, not a certified taxi meter. GPS accuracy, th
 
 ## Primary flow
 
-1. The app opens to the taximeter and shows the most recently saved tariff.
-2. The user opens **Tariff** and enters three monetary amounts:
+1. The app opens to the taximeter and shows the most recently saved tariff. On a first run, when no tariff has been saved yet, it opens the **Tariff** screen instead, because the meter cannot bill without rates.
+2. The user opens **Tariff** — automatically on a first run, or from **Edit** beside the current tariff — and enters three monetary amounts:
    - Initial tax — charged once when a ride begins.
    - Per km rate — charged for GPS distance travelled.
    - Per minute car-still rate — charged while speed is below the still threshold.
@@ -57,7 +57,11 @@ Input is trimmed and must contain digits with at most one decimal separator (`.`
 
 ## Tariff editing
 
-Tariff editing is presented in a bottom section or sheet with three numeric fields. A **Save tariff** action accepts whole numbers or decimal values (with either `.` or `,` as the decimal separator), validates that all costs are non-negative, and persists them locally. On first launch there is no implied default tariff: Start remains unavailable until all three fields are saved. The current tariff remains visible beneath the meter while a ride runs.
+Tariff editing is a **separate screen**, not a panel inside the meter. It opens automatically on a first run, when no tariff has been saved, and is otherwise reached from the **Edit** control beside the current tariff on the meter. A **Save tariff** action accepts whole numbers or decimal values (with either `.` or `,` as the decimal separator), validates that all costs are non-negative, persists them locally, and returns to the meter.
+
+Keeping the meter free of entry fields means the fare reading is never competing with a keyboard, and the running meter cannot be mistaken for an editable form. On a first run the screen has no way to leave without saving a tariff: there is no implied default, and Start must never be reachable without rates. When an existing tariff is being edited, the screen offers **Cancel** and leaves the stored values untouched.
+
+The current tariff remains visible beneath the meter, including while a ride runs; only its **Edit** control is withdrawn for the duration of the ride.
 
 Initial tax and rates may be changed only between rides. Starting a ride copies and locks the full tariff for that ride; the tariff editor is disabled until it ends. This makes every saved fare reproducible in its original tariff units, even though no currency is stored.
 
@@ -153,7 +157,7 @@ If precise permission is revoked during a ride, the service immediately freezes 
 ## Android implementation outline
 
 - **Minimum Android version:** Android 7.0 (API 24).
-- **Main screen:** one `MainActivity` containing the meter, ride controls, tariff summary, and tariff editor.
+- **Main screen:** one `MainActivity` hosting Compose destinations. Meter carries the meter face, ride controls, and the read-only tariff summary; Tariff is its own destination for entry and editing.
 - **Meter renderer:** a custom Jetpack Compose drawing component renders the vintage face crisply across screen sizes while semantic Compose text and controls preserve accessibility.
 - **Active ride:** a foreground `Service` owns location updates and the fare engine, allowing tracking to continue with the app backgrounded or the screen locked. Its ongoing notification exposes the active state and a stop control.
 - **State:** a small fare engine owns distance, idle duration, explicit moving/idle state, running state, and decimal fare calculation; it is separated from UI code for straightforward unit tests.
@@ -162,7 +166,7 @@ If precise permission is revoked during a ride, the service immediately freezes 
 
 ## Acceptance criteria for the first build
 
-- The user can save all three cost fields (as either whole or decimal values) and sees them after reopening the app; the meter shows totals with two decimal places and no currency label.
+- A first run opens the tariff screen, and the meter becomes reachable only once all three cost fields are saved. The user can save all three cost fields (as either whole or decimal values) and sees them after reopening the app; the meter shows totals with two decimal places and no currency label.
 - With location permission granted, Start/Pause/Resume/Stop & save/Discard ride work reliably; pre-ride Reset works reliably.
 - The displayed bill starts with the initial tax, grows with valid distance, and grows with valid still time.
 - An active ride continues to track when the app is backgrounded, with a persistent notification that makes this clear and can stop the ride.

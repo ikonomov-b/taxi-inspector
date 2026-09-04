@@ -1,9 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <color name="paper">#F5EBD2</color>
-    <color name="ink">#1A1B18</color>
     <color name="cab_yellow">#E7B52E</color>
-    <color name="meter_green">#A7C957</color>
-    <color name="muted_ink">#625E52</color>
-    <color name="line">#CFC2A6</color>
 </resources>

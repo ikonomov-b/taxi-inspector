@@ -29,7 +29,7 @@ The safety priority is explainability: uncertain GPS data freezes billing rather
 
 | Area | Path | Current responsibility |
 | --- | --- | --- |
-| Application shell | `app/src/main/java/com/taxiinspector/MainActivity.kt` | Compose placeholder only; it is not a working meter UI. |
+| Application shell | `app/src/main/java/com/taxiinspector/MainActivity.kt` | Edge-to-edge Compose host; it only sets `TaxiInspectorApp()` and owns no ride state. |
 | Application composition | `app/src/main/java/com/taxiinspector/TaxiInspectorApplication.kt` | Creates the explicit application container. |
 | Exact decimal units | `app/src/main/java/com/taxiinspector/core/decimal/DecimalAmount.kt` | Parse, preserve, and format currency-neutral tariff units. |
 | Clock boundary | `app/src/main/java/com/taxiinspector/core/time/` | Monotonic elapsed time for billing and UTC time for history. |
@@ -37,10 +37,11 @@ The safety priority is explainability: uncertain GPS data freezes billing rather
 | Local persistence | `app/src/main/java/com/taxiinspector/data/rides/` | Room entities, mappings, DAO, database, repository, and app container. |
 | GPS location adapter | `app/src/main/java/com/taxiinspector/data/location/` | Android-free `LocationClient` boundary and the `LocationManager.GPS_PROVIDER` adapter. |
 | Foreground tracking | `app/src/main/java/com/taxiinspector/tracking/` | Non-sticky service, serialized ride owner, commands, notifications, prerequisite checks, ownership binding, and recovery coordination. |
+| Meter UI | `app/src/main/java/com/taxiinspector/ui/` | `TaxiInspectorApp`, the vintage theme, and `meter/` + `tariff/`: immutable UI state, actions, one-off effects, the meter face, and tariff entry. It renders state and sends commands; it never owns a ride or reads location. |
 | Unit tests | `app/src/test/java/com/taxiinspector/` | JVM tests for decimal parsing, fare calculation, and core ride state. |
-| Android integration tests | `app/src/androidTest/java/com/taxiinspector/` | API 35 Room, GPS adapter, foreground service, notification action, and recovery integration tests. |
+| Android integration tests | `app/src/androidTest/java/com/taxiinspector/` | API 35 Room, GPS adapter, foreground service, notification action, recovery, Compose meter-screen, and meter state-holder tests. |
 | Room schema | `app/schemas/` | Versioned exported schema. Keep it updated with intentional schema changes. |
-| Android resources | `app/src/main/res/` | Existing basic colors/styles; visual system remains mostly unimplemented. |
+| Android resources | `app/src/main/res/` | Vintage palette, launcher/notification resources, and every user-facing string. Visual refinement remains Phase 9 work. |
 
 ## Current implementation status
 

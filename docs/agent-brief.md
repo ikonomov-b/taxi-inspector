@@ -12,7 +12,7 @@ The safety principle is simple: uncertain GPS freezes billing. The app never est
 
 - Money and tariff units are exact, non-negative decimals. Do not use `Double` or `Float` for them; use those types only for GPS measurements and geometric distance.
 - The `ride` package is pure Kotlin: no Android, Room, Compose, or service imports.
-- A running ride has one writer: the future tracking service. UI observes state and sends explicit commands only.
+- A running ride has one writer: the foreground tracking service. UI observes state and sends explicit commands only, and holds no `Context`, `Location`, or service reference in a ViewModel.
 - Keep no route or raw location history. An active snapshot may retain only a temporary baseline point for the current calculation.
 - Do not add networking, analytics, accounts, maps, cloud sync, advertising identifiers, or currency features without explicit approval.
 

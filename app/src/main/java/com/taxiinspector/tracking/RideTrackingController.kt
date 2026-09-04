@@ -157,10 +157,17 @@ internal class RideTrackingController(
 
     private suspend fun stopAndSave() {
         val current = activeRide ?: repository.currentActiveRide()
-            ?.takeIf { it.phase == RidePhase.Paused }
+            ?.takeIf { it.phase == RidePhase.Paused || it.phase == RidePhase.PendingInterrupted }
             ?: return
-        val summary = RideEngine.finish(current, clock.elapsedRealtimeMillis())
-        repository.finishCompleted(summary, clock.utcMillis())
+        // Elapsed realtime restarts at boot, so a snapshot recovered after a reboot can
+        // legitimately predate "now"; the unobserved interval is never billed either way.
+        val endedElapsedMillis = maxOf(clock.elapsedRealtimeMillis(), current.startedElapsedMillis)
+        val summary = RideEngine.finish(current, endedElapsedMillis)
+        if (current.phase == RidePhase.PendingInterrupted) {
+            repository.saveInterrupted(summary, clock.utcMillis())
+        } else {
+            repository.finishCompleted(summary, clock.utcMillis())
+        }
         finishOwnership()
     }
 

@@ -114,6 +114,7 @@ app/
     │   │   │   ├── TrackingPrerequisites.kt
     │   │   │   ├── RideRecoveryCoordinator.kt
     │   │   │   ├── RideServiceCommandRouter.kt
+    │   │   │   ├── RideServiceOwnershipConnection.kt
     │   │   │   └── RideNotificationFactory.kt
     │   │   ├── ui/
     │   │   │   ├── TaxiInspectorApp.kt
@@ -124,10 +125,14 @@ app/
     │   │   │   │   ├── MeterViewModel.kt
     │   │   │   │   ├── MeterUiState.kt
     │   │   │   │   ├── MeterAction.kt
+    │   │   │   │   ├── MeterEffect.kt
     │   │   │   │   ├── MeterScreen.kt
     │   │   │   │   └── TaximeterFace.kt
     │   │   │   ├── tariff/
-    │   │   │   │   └── TariffSheet.kt
+    │   │   │   │   ├── TariffRoute.kt
+    │   │   │   │   ├── TariffViewModel.kt
+    │   │   │   │   ├── TariffUiState.kt
+    │   │   │   │   └── TariffScreen.kt
     │   │   │   └── history/
     │   │   │       ├── HistoryViewModel.kt
     │   │   │       ├── HistoryScreen.kt
@@ -197,30 +202,36 @@ The service accepts only explicit commands: `START`, `PAUSE`, `RESUME`, `STOP`, 
 
 The manifest declares a non-exported service as `foregroundServiceType="location"` and includes `ACCESS_FINE_LOCATION`, `FOREGROUND_SERVICE`, and `FOREGROUND_SERVICE_LOCATION`. The service verifies prerequisites again, creates its notification channel, calls `startForeground()` promptly, and handles foreground-service start/security failures by persisting no new billable state and returning an actionable error. `POST_NOTIFICATIONS` is requested on Android 13+ and is deliberately required by this product before Start: although Android permits an FGS to launch without it, a hidden notification would undermine the app's inspectable live-ride promise. Android requires foreground-service types to be declared and checks their applicable prerequisites. [Android foreground-service declaration guidance](https://developer.android.com/develop/background-work/services/fgs/declare)
 
-The service runs `START_NOT_STICKY`. Service liveness is not inferred from an `AppContainer` flag. When the UI opens with an active row in the `Running` phase, its controller first binds to the service and asks whether it owns that session. Only after confirming that no live service owns that running session may a repository transaction change the row once to `PendingInterrupted`; a deliberately `Paused` row is rendered as paused and is never recovered as interrupted. The UI then exposes **Save as interrupted** / **Discard**. Saving is idempotent, so repeated launches cannot insert duplicate history. The app never restarts GPS or bills time between processes.
+The service runs `START_NOT_STICKY`. Service liveness is not inferred from an `AppContainer` flag. When the UI opens with an active row in the `Running` phase, `RideServiceOwnershipConnection` binds **without** `BIND_AUTO_CREATE` — creating the service would answer the ownership question with a service the check itself started — and asks whether it owns that session. A ride this screen just started is never re-checked, because binding could otherwise race the service still starting up. Only after confirming that no live service owns that running session may a repository transaction change the row once to `PendingInterrupted`; a deliberately `Paused` row is rendered as paused and is never recovered as interrupted. The UI then exposes **Save as interrupted** / **Discard**. Saving is idempotent, so repeated launches cannot insert duplicate history. The app never restarts GPS or bills time between processes.
 
 `PAUSE` persists the Paused row before it stops location updates, removes foreground mode and its notification, and stops the service. The next `RESUME` creates a foreground-service instance from that persisted row while the activity is visible. If precise permission is revoked while tracking, the service freezes the fare, persists a recoverable permission-needed state, and stops GPS work safely.
 
 ## UI structure and state
 
-The app has three destinations: Meter, History, and Ride Detail. Tariff editing is a modal sheet attached to Meter, not a separate destination. This keeps the everyday flow shallow.
+The app has four destinations: Meter, Tariff, History, and Ride Detail. Tariff is its own destination rather than a sheet on Meter, so the fare reading never shares a screen with entry fields and a soft keyboard. A first run with no saved tariff starts on Tariff; every later visit is reached from the meter's Edit control.
 
 Each screen has one `ViewModel` with a public immutable `UiState` and a single action entry point:
 
 ```kotlin
 data class MeterUiState(
-    val meter: MeterPresentation = MeterPresentation.empty(),
-    val tariff: Tariff = Tariff.empty(),
-    val gpsStatus: GpsStatus = GpsStatus.NotReady,
+    val presentation: MeterPresentation = MeterPresentation.EMPTY,
+    val savedTariff: TariffSummary? = null,
+    val status: MeterStatus = MeterStatus.TariffNeeded,
     val canStart: Boolean = false,
-    val isTariffSheetVisible: Boolean = false,
-    val pendingConfirmation: Confirmation? = null
+    val canEditTariff: Boolean = true,
+    val isDiscardConfirmationVisible: Boolean = false,
+    val recovery: MeterRecovery? = null,
+    val message: MeterMessage? = null
 )
 
 fun onAction(action: MeterAction)
 ```
 
-`MeterPresentation` contains only formatted fare, distance, wait-time, ride status, and GPS status—never coordinates or a raw `Location`. Compose screens collect state with `collectAsStateWithLifecycle()`. They render only from `UiState`; transient Android work (permission launcher, opening Settings, navigation, and service command intent) is emitted as one-off UI effects and performed by the route/activity. `TaximeterFace` is a pure composable drawing component, taking formatted values and content descriptions as parameters.
+`MeterPresentation` contains only formatted fare, distance, wait-time, ride status, and GPS status—never coordinates or a raw `Location`. Compose screens collect state with `collectAsStateWithLifecycle()`. They render only from `UiState`; transient Android work (permission launcher, opening Settings, navigation, and service command intent) is emitted as one-off `MeterEffect` values over a channel and performed by the route/activity. `TaximeterFace` is a pure composable drawing component, taking formatted values and content descriptions as parameters.
+
+Permission and GPS-provider state are Android facts a ViewModel must not read. The route inspects them whenever the screen resumes and after a permission dialog closes, and reports them as an explicit `MeterEnvironment` value. The ViewModel therefore decides *whether* a Start may proceed while the route decides *how* to ask.
+
+Because a derived `StateFlow` may not have recomposed when an action arrives, each state holder also mirrors the durable values its actions depend on (the saved tariff and the active ride) in plain fields updated by the same collectors. An action reads the mirror; the repository transaction remains the final guard.
 
 ViewModels never hold `Context`, `Location`, a `Service`, or mutable fare state. The service and repositories expose `Flow`s; ViewModels combine them for display. This prevents an orientation change or screen recreation from altering a ride.
 
@@ -260,7 +271,7 @@ Avoid generic `BaseViewModel`, repository base classes, event buses, global muta
 | Unit | ViewModels | permission/status states and actions using a fake repository. |
 | Instrumented | Room DAO/repository | active-to-summary transaction, history trimming to 10, persistence after recreation. |
 | Instrumented | Service/location adapter | foreground command handling, fake location updates, notification actions, discard confirmation path, service-bind-before-recovery, and idempotent interrupted-session recovery. |
-| Compose UI | Meter, tariff sheet, history/detail | formatted display, confirmations, accessibility labels, dynamic text. |
+| Compose UI | Meter, tariff screen, history/detail | formatted display, confirmations, accessibility labels, dynamic text. |
 | Manual device | real GPS/background | screen lock, GPS toggle, weak signal, permission revocation, notification denial, process death, force-stop, reboot, and street/slow-traffic/urban-canyon/tunnel field validation. |
 
 Keep test fakes alongside their consumers. For example, `FakeLocationClient` sits beside tracking tests rather than mocking `LocationManager`. Every documented fare threshold has a named unit test.
@@ -271,7 +282,7 @@ Keep test fakes alongside their consumers. For example, `FakeLocationClient` sit
 2. Implement and unit-test `DecimalAmount`, ride models, `FareCalculator`, and `RideEngine` before Android UI work.
 3. Add the Room entities/DAO/repository; test transaction, migration, and ten-record trimming.
 4. Implement the GPS adapter and foreground service with fake-location tests for billable/weak/lost fixes, foreground start failure, and safe pause/resume.
-5. Build Meter and tariff UI, explicit Stop & save/Discard ride controls, permission/status handling, then attach it to the service command path.
+5. Build the Meter destination and the separate Tariff destination, explicit Stop & save/Discard ride controls, permission/status handling, then attach them to the service command path.
 6. Build history/detail and recovery flows.
 7. Complete Compose accessibility tests and manual real-device background/GPS validation.
 

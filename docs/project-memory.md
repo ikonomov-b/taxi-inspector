@@ -8,6 +8,7 @@
 - Tariffs are currency-agnostic decimal units. Users enter all values in the taxi’s local unit. The app has no currency setting, label, code, conversion, or exchange rate.
 - Tariff values accept ASCII digits with one optional `.` or `,`, up to six fractional digits. Values are exact `BigDecimal` amounts. Totals display to two places with half-up rounding and the device decimal separator.
 - A ride locks the full tariff at Start. Tariffs cannot be edited while any active ride exists.
+- Tariff entry is its own destination, not a panel on the meter. A first run with no saved tariff opens it directly and offers no way out without saving; afterwards it is reached from the meter's Edit control, which is withdrawn while a ride is active. This keeps the fare reading off the same screen as a keyboard and makes "no tariff, no meter" structural rather than a disabled button.
 - Stop & save records a Completed ride. Discard ride is destructive and requires confirmation. Pre-ride Reset has no saved ride to delete.
 - Retain only the ten newest saved records. Save no route or raw location history.
 
@@ -26,7 +27,8 @@
 - Compose is the sole UI approach. Use a custom Compose drawing component for the vintage face, not the deleted legacy Android `View`.
 - `ride` is a pure Kotlin domain. `Room` and Android APIs belong outside it.
 - Room is the only persistent store for current tariff, active ride, and history. Decimal database values are canonical strings.
-- The foreground tracking service is the sole writer of a running active session. It runs `START_NOT_STICKY`, never silently resumes after process death, and requires a bind/check of live service ownership before classifying a Running snapshot as interrupted.
+- The foreground tracking service is the sole writer of a running active session. It runs `START_NOT_STICKY`, never silently resumes after process death, and requires a bind/check of live service ownership before classifying a Running snapshot as interrupted. That bind deliberately omits `BIND_AUTO_CREATE`, because a service created by the check would answer the ownership question about itself.
+- ViewModels read no Android state. The route reports permission and GPS-provider facts as an explicit environment value, and every Android side effect (permission dialog, Settings, navigation, service command, ownership bind) leaves the ViewModel as a one-off effect. This keeps screen recreation from re-requesting a permission or re-sending a command.
 
 ## Live-state pointer
 

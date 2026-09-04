@@ -12,9 +12,9 @@ This is the single authoritative progress record for implementation work. Update
 
 ## Current summary
 
-**Overall state: In progress — phases 0–5 complete; phase 6 is the next implementation gate.**
+**Overall state: In progress — phases 0–6 complete; phase 7 is the next implementation gate.**
 
-The project has a reproducible Gradle/Compose baseline, an exact Android-free fare core, an integration-tested Room layer, a GPS-only adapter, and a foreground-service tracking vertical slice. The app still presents only a placeholder screen, so users cannot yet enter tariffs, request permissions, start a ride, or view history through production UI.
+The project has a reproducible Gradle/Compose baseline, an exact Android-free fare core, an integration-tested Room layer, a GPS-only adapter, a foreground-service tracking vertical slice, and a working Meter UI wired to that service. A user can now save a tariff, grant permissions, run a visible ride, pause/resume, stop and save, or discard after confirmation. History and ride detail remain unbuilt, so saved rides cannot yet be reviewed in the app.
 
 Last verified: **2026-09-04**
 
@@ -26,7 +26,7 @@ JAVA_HOME=/opt/android-studio-for-platform/jbr \
 BUILD SUCCESSFUL
 ```
 
-The debug JVM report contains 8 tests and the API 35 instrumentation report contains 26 Room/location/service tests, with 0 failures, 0 errors, and 0 skipped tests.
+The debug JVM report contains 8 tests and the API 35 instrumentation report contains 58 Room/location/service/UI tests, with 0 failures, 0 errors, and 0 skipped tests.
 
 ## Phase tracker
 
@@ -38,8 +38,8 @@ The debug JVM report contains 8 tests and the API 35 instrumentation report cont
 | 3. Durable local state | Complete | Room v1 database, tariff/settings row, active-ride snapshot, summary history, atomic start/finish/interrupted-save transactions, ten-record trimming, repository, mappers, exported schema, and migration-test fixture. | 7 API 35 instrumentation tests verify tariff locking, finish rollback, concurrent interrupted-save idempotence, recreation mapping, deletion, trimming, and the exported v1 schema. UI/service wiring belongs to their later phases. |
 | 4. GPS-only location adapter | Complete | Android-free `LocationClient`, GPS-only `AndroidGpsLocationClient`, elapsed-realtime/sample mapping, provider availability checks, explicit 1 Hz subscription, and cancellation cleanup. | 5 API 35 fake-backed tests verify provider availability, subscription cadence, exact listener removal, GPS/non-GPS mapping, optional speed, and malformed-fix rejection. |
 | 5. Foreground tracking service | Complete | Non-sticky location FGS, serialized controller, explicit commands, prerequisite rechecks, bounded fare notifications, notification Pause/Stop, ownership binder, persisted pause/stop/discard, and interrupted recovery coordination. | 14 new API 35 tests cover prerequisite/foreground failures, command serialization, permission loss, paused Resume/Stop, Discard, throttling, ownership/recovery, real service binding, screen recreation/off, and actual notification actions. |
-| 6. Essential Meter UI | Not started | Only a Compose placeholder exists. | Implement tariff sheet, meter presentation, permission effects, state-specific Start/Pause/Resume/Stop/Discard controls, and accessibility semantics. |
-| 7. History and recovery UI | Not started | Persistence types exist only. | Implement list/detail, deletion confirmation, and save/discard interrupted recovery. |
+| 6. Essential Meter UI | Complete | Vintage theme and `TaximeterFace`, `MeterScreen`/`MeterRoute`/`MeterViewModel` with immutable state, actions and one-off effects, a separate Tariff destination with exact-decimal validation, permission/GPS gating with Settings recovery, confirmed Discard, and bind-before-recovery wiring. | 32 API 35 tests cover the meter screen, tariff screen, meter state holder, and tariff state holder. Visual refinement of the meter face stays in Phase 9. |
+| 7. History and recovery UI | Not started | Persistence types exist; the meter already presents and can save or discard a recovered interrupted ride. | Implement list/detail destinations, individual deletion confirmation, and end-to-end persistence tests. |
 | 8. Quality, accessibility, privacy, and device validation | Not started | Build uses private local storage and has no network permission. | Complete real-device tests, accessibility tests, backup decision, disclosure, and store data-safety work. |
 | 9. Non-essential polish | Not started | — | Vintage visual refinement, onboarding, extra visual regression coverage, and any separately approved optional enhancements. |
 
@@ -74,6 +74,16 @@ The debug JVM report contains 8 tests and the API 35 instrumentation report cont
 - `AndroidGpsLocationClient`: GPS-provider-only 1 Hz subscription with elapsed-realtime domain mapping
 - Location collection cancellation unregisters the exact platform listener and safely tolerates permission revocation
 
+### Meter and tariff UI
+
+- `ui/TaxiInspectorApp.kt` and `ui/navigation/AppNavGraph.kt`: Meter and Tariff destinations; a first run with no saved tariff starts on Tariff
+- `ui/theme/`: the warm paper/charcoal/yellow/LCD palette and the monospaced fare type
+- `ui/meter/MeterViewModel.kt`: derives display state from Room, gates Start/Resume on permissions and the GPS provider, and emits one-off effects
+- `ui/meter/MeterEffect.kt`: permission requests, Settings, service commands, and the ownership check the route performs
+- `ui/meter/MeterScreen.kt` and `TaximeterFace.kt`: state-specific controls, confirmed Discard, and per-value content descriptions
+- `ui/tariff/`: the tariff destination, its exact-decimal validation, and the ride lock
+- `tracking/RideServiceOwnershipConnection.kt`: binds without `BIND_AUTO_CREATE` so recovery cannot be answered by a service it started
+
 ### Foreground tracking
 
 - `RideTrackingService`: non-exported location FGS with non-sticky restart policy and local ownership binder
@@ -84,22 +94,22 @@ The debug JVM report contains 8 tests and the API 35 instrumentation report cont
 ## Known limitations and active risks
 
 1. The exact fare core has targeted unit tests but does not yet cover every documented threshold, rejected segment, and interrupted-session transition.
-2. `MainActivity` is intentionally a placeholder; the tested service is not yet connected to production permission, tariff, or meter controls.
+2. The meter face is functional and accessible but visually plain; the late-1970s styling, texture, and transitions remain Phase 9 work.
 3. Automated service tests use emulator/fake GPS inputs; real street, tunnel, and weak-signal field validation remains part of Phase 8.
 4. The database is still version 1, so the migration fixture validates the exported baseline but cannot exercise a forward migration until a future schema version exists.
 5. The local Android SDK path is machine-specific and remains in ignored `local.properties`; it must never be committed.
+6. The local emulator intermittently aborts an instrumentation run with a `UiAutomation` "already registered" / "Not connected!" error, truncating the report. It is an environment fault, not a product one: the affected tests pass on a re-run, and it has hit both the Phase 5 service tests and the Phase 6 UI tests. Re-run `connectedDebugAndroidTest` and confirm the report shows the full 58 tests before trusting a failure.
 
 ## Next phase gate
 
-Implement Phase 6's essential Meter UI:
+Implement Phase 7's history and interrupted-session UX:
 
-- add `MeterViewModel`, immutable UI state/actions/effects, and lifecycle-safe Room observation;
-- implement exact tariff entry/validation and lock editing while a ride exists;
-- request precise location and notification permission only from the visible route;
-- connect explicit Start/Pause/Resume/Stop/Discard actions to the tested service command path; and
-- add Compose UI tests for state-specific controls, totals, confirmations, status recovery, and semantics.
+- add History and Ride Detail destinations to `ui/navigation/AppNavGraph.kt`, reached from the meter;
+- show newest-first summaries with end date/time, total, distance, and completed/interrupted status, and never a route;
+- require confirmation before deleting a saved record; and
+- test complete, discard, interrupted-save, deletion, and ten-record trimming end to end through the UI and repository.
 
-Build control behavior and recovery effects before visual styling. Do not begin History UI until the Meter flow remains correct through recreation and never exposes tariff editing during an active ride.
+The meter already presents a recovered interrupted ride and can save or discard it, so Phase 7 adds review and deletion rather than recovery itself.
 
 ### Phase 3 — Durable local state
 
@@ -161,6 +171,34 @@ Verification:
 Remaining risk or next gate:
 - The service is not user-accessible until Phase 6 supplies tariff, permission, meter, confirmation, and recovery UI.
 - Real-world GPS/background field validation remains a Phase 8 gate.
+
+### Phase 6 — Essential Meter UI
+
+Status: Complete
+Date: 2026-09-04
+Delivered:
+- Added `MeterViewModel` with immutable `MeterUiState`, a single `onAction` entry point, and one-off `MeterEffect` values, holding no `Context`, `Location`, service reference, or mutable fare state.
+- Added `MeterScreen` and the `TaximeterFace` drawing component: formatted total with no currency label, distance, wait time, plain-language GPS status outside the meter, and per-value content descriptions.
+- Added state-specific controls — Start/Reset, Pause/Stop & save, Resume/Stop & save, Save as interrupted — with Discard kept apart from Stop & save and always confirmed.
+- Moved tariff entry to its own destination (`ui/tariff/`) with per-field exact-decimal validation, the ride lock, and a `TariffViewModel`; a first run with no saved tariff opens it directly and cannot be left without saving.
+- Added `ui/navigation/AppNavGraph.kt` with the Meter and Tariff destinations and the first-run start-destination decision.
+- Gated Start and Resume on precise location, notification permission, and an enabled GPS provider, requesting one permission at a time and offering Settings recovery when a check fails.
+- Wired production interrupted-recovery: `RideServiceOwnershipConnection` binds without `BIND_AUTO_CREATE`, and a Running snapshot is converted only when no live service claims it.
+- Fixed `RideTrackingController.stopAndSave()` to clamp the end timestamp for a snapshot recovered after a reboot, so Save as interrupted cannot fail on an elapsed-realtime reset.
+- Added the vintage Compose theme and moved the palette into `ui/theme/Color.kt`, removing the superseded duplicate XML colors.
+
+Verification:
+- Command: `GRADLE_USER_HOME=/tmp/taxi-inspector-gradle JAVA_HOME=/opt/android-studio-for-platform/jbr ./gradlew --no-daemon test connectedDebugAndroidTest`
+- Result: `BUILD SUCCESSFUL`; 8 debug JVM tests and 58 API 35 instrumentation tests passed with no failures, errors, or skips.
+- The 32 new API 35 tests cover meter totals and readouts, state-specific controls, the confirmed Discard dialog, screen-reader labels, permission and GPS recovery actions, tariff validation per field, the ride lock, the documented `6.45` fare example rendered end to end, and single-shot interrupted recovery.
+- One Compose test types into the tariff fields with the IME open, because focusing a field re-pads and scrolls the inset-aware column; every interaction re-resolves its node rather than reusing earlier bounds.
+- Command: `GRADLE_USER_HOME=/tmp/taxi-inspector-gradle JAVA_HOME=/opt/android-studio-for-platform/jbr ./gradlew --no-daemon lint`
+- Result: `BUILD SUCCESSFUL`; 0 errors. Existing pinned-dependency and missing-launcher-icon warnings remain.
+
+Remaining risk or next gate:
+- The meter face is functional and accessible but visually plain; the late-1970s styling, texture, and transitions are Phase 9 work.
+- Saved rides cannot yet be reviewed or deleted in the app; that is the Phase 7 gate.
+- Real-device street, tunnel, weak-signal, and reboot validation of the whole flow remains a Phase 8 gate.
 
 ## Update template
 
