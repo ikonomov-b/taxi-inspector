@@ -1,0 +1,290 @@
+{
+  "formatVersion": 1,
+  "database": {
+    "version": 1,
+    "identityHash": "0a1b81a91607e6e31b79e1b93ecf46cc",
+    "entities": [
+      {
+        "tableName": "app_settings",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` INTEGER NOT NULL, `initialTax` TEXT NOT NULL, `perKmRate` TEXT NOT NULL, `perMinuteStillRate` TEXT NOT NULL, PRIMARY KEY(`id`))",
+        "fields": [
+          {
+            "fieldPath": "id",
+            "columnName": "id",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "initialTax",
+            "columnName": "initialTax",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "perKmRate",
+            "columnName": "perKmRate",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "perMinuteStillRate",
+            "columnName": "perMinuteStillRate",
+            "affinity": "TEXT",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "id"
+          ]
+        },
+        "indices": [],
+        "foreignKeys": []
+      },
+      {
+        "tableName": "active_ride",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` TEXT NOT NULL, `initialTax` TEXT NOT NULL, `perKmRate` TEXT NOT NULL, `perMinuteStillRate` TEXT NOT NULL, `phase` TEXT NOT NULL, `trackingStatus` TEXT NOT NULL, `distanceMeters` TEXT NOT NULL, `idleMillis` INTEGER NOT NULL, `motionState` TEXT NOT NULL, `startedElapsedMillis` INTEGER NOT NULL, `lastTickElapsedMillis` INTEGER NOT NULL, `lastAcceptedFixElapsedMillis` INTEGER, `lastFreshBillableReceivedElapsedMillis` INTEGER, `pointLatitude` REAL, `pointLongitude` REAL, `pointAccuracyMeters` REAL, `pointProvider` TEXT, `pointSpeedMetersPerSecond` REAL, `pointFixElapsedMillis` INTEGER, `pointReceivedElapsedMillis` INTEGER, `lastSpeedMetersPerSecond` REAL, `lastSpeedReceivedElapsedMillis` INTEGER, `lowSpeedCandidateMillis` INTEGER NOT NULL, `highSpeedCandidateMillis` INTEGER NOT NULL, PRIMARY KEY(`id`))",
+        "fields": [
+          {
+            "fieldPath": "id",
+            "columnName": "id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "initialTax",
+            "columnName": "initialTax",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "perKmRate",
+            "columnName": "perKmRate",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "perMinuteStillRate",
+            "columnName": "perMinuteStillRate",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "phase",
+            "columnName": "phase",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "trackingStatus",
+            "columnName": "trackingStatus",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "distanceMeters",
+            "columnName": "distanceMeters",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "idleMillis",
+            "columnName": "idleMillis",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "motionState",
+            "columnName": "motionState",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "startedElapsedMillis",
+            "columnName": "startedElapsedMillis",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "lastTickElapsedMillis",
+            "columnName": "lastTickElapsedMillis",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "lastAcceptedFixElapsedMillis",
+            "columnName": "lastAcceptedFixElapsedMillis",
+            "affinity": "INTEGER",
+            "notNull": false
+          },
+          {
+            "fieldPath": "lastFreshBillableReceivedElapsedMillis",
+            "columnName": "lastFreshBillableReceivedElapsedMillis",
+            "affinity": "INTEGER",
+            "notNull": false
+          },
+          {
+            "fieldPath": "pointLatitude",
+            "columnName": "pointLatitude",
+            "affinity": "REAL",
+            "notNull": false
+          },
+          {
+            "fieldPath": "pointLongitude",
+            "columnName": "pointLongitude",
+            "affinity": "REAL",
+            "notNull": false
+          },
+          {
+            "fieldPath": "pointAccuracyMeters",
+            "columnName": "pointAccuracyMeters",
+            "affinity": "REAL",
+            "notNull": false
+          },
+          {
+            "fieldPath": "pointProvider",
+            "columnName": "pointProvider",
+            "affinity": "TEXT",
+            "notNull": false
+          },
+          {
+            "fieldPath": "pointSpeedMetersPerSecond",
+            "columnName": "pointSpeedMetersPerSecond",
+            "affinity": "REAL",
+            "notNull": false
+          },
+          {
+            "fieldPath": "pointFixElapsedMillis",
+            "columnName": "pointFixElapsedMillis",
+            "affinity": "INTEGER",
+            "notNull": false
+          },
+          {
+            "fieldPath": "pointReceivedElapsedMillis",
+            "columnName": "pointReceivedElapsedMillis",
+            "affinity": "INTEGER",
+            "notNull": false
+          },
+          {
+            "fieldPath": "lastSpeedMetersPerSecond",
+            "columnName": "lastSpeedMetersPerSecond",
+            "affinity": "REAL",
+            "notNull": false
+          },
+          {
+            "fieldPath": "lastSpeedReceivedElapsedMillis",
+            "columnName": "lastSpeedReceivedElapsedMillis",
+            "affinity": "INTEGER",
+            "notNull": false
+          },
+          {
+            "fieldPath": "lowSpeedCandidateMillis",
+            "columnName": "lowSpeedCandidateMillis",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "highSpeedCandidateMillis",
+            "columnName": "highSpeedCandidateMillis",
+            "affinity": "INTEGER",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "id"
+          ]
+        },
+        "indices": [],
+        "foreignKeys": []
+      },
+      {
+        "tableName": "ride_summary",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` TEXT NOT NULL, `initialTax` TEXT NOT NULL, `perKmRate` TEXT NOT NULL, `perMinuteStillRate` TEXT NOT NULL, `total` TEXT NOT NULL, `distanceMeters` TEXT NOT NULL, `idleMillis` INTEGER NOT NULL, `elapsedMillis` INTEGER NOT NULL, `endedElapsedMillis` INTEGER NOT NULL, `endedAtUtcMillis` INTEGER NOT NULL, `status` TEXT NOT NULL, PRIMARY KEY(`id`))",
+        "fields": [
+          {
+            "fieldPath": "id",
+            "columnName": "id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "initialTax",
+            "columnName": "initialTax",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "perKmRate",
+            "columnName": "perKmRate",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "perMinuteStillRate",
+            "columnName": "perMinuteStillRate",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "total",
+            "columnName": "total",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "distanceMeters",
+            "columnName": "distanceMeters",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "idleMillis",
+            "columnName": "idleMillis",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "elapsedMillis",
+            "columnName": "elapsedMillis",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "endedElapsedMillis",
+            "columnName": "endedElapsedMillis",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "endedAtUtcMillis",
+            "columnName": "endedAtUtcMillis",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "status",
+            "columnName": "status",
+            "affinity": "TEXT",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "id"
+          ]
+        },
+        "indices": [],
+        "foreignKeys": []
+      }
+    ],
+    "views": [],
+    "setupQueries": [
+      "CREATE TABLE IF NOT EXISTS room_master_table (id INTEGER PRIMARY KEY,identity_hash TEXT)",
+      "INSERT OR REPLACE INTO room_master_table (id,identity_hash) VALUES(42, '0a1b81a91607e6e31b79e1b93ecf46cc')"
+    ]
+  }
+}
