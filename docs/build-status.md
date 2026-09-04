@@ -98,7 +98,6 @@ The debug JVM report contains 8 tests and the API 35 instrumentation report cont
 3. Automated service tests use emulator/fake GPS inputs; real street, tunnel, and weak-signal field validation remains part of Phase 8.
 4. The database is still version 1, so the migration fixture validates the exported baseline but cannot exercise a forward migration until a future schema version exists.
 5. The local Android SDK path is machine-specific and remains in ignored `local.properties`; it must never be committed.
-6. The local emulator intermittently aborts an instrumentation run with a `UiAutomation` "already registered" / "Not connected!" error, truncating the report. It is an environment fault, not a product one: the affected tests pass on a re-run, and it has hit both the Phase 5 service tests and the Phase 6 UI tests. Re-run `connectedDebugAndroidTest` and confirm the report shows the full 58 tests before trusting a failure.
 
 ## Next phase gate
 

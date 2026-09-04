@@ -39,7 +39,7 @@
 - Android Studio Panda: `/opt/android-studio-for-platform`.
 - Bundled JBR: `/opt/android-studio-for-platform/jbr` (OpenJDK 21.0.9).
 - Android SDK: `/home/bobi/Android/Sdk`, with Platform 35 and build-tools 35.0.0.
-- Android Emulator 37.1.11 and the API 35 default x86_64 system image are installed; the verified KVM-accelerated AVD is named `taxi-inspector-api35`.
+- Android Emulator 37.1.11 and the API 35 default x86_64 system image are installed; the verified KVM-accelerated AVD is named `taxi-inspector-api35`. Exactly one instrumentation run may drive it at a time; concurrent runs collide over `UiAutomation` and produce misleading test failures.
 - `local.properties` points to that SDK and is intentionally ignored. Never commit it.
 
 ## Update rules

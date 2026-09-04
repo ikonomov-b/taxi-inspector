@@ -34,6 +34,14 @@ The local `taxi-inspector-api35` AVD uses that API 35 x86_64 image. KVM accelera
   -gpu swiftshader_indirect -no-snapshot
 ```
 
+Only one instrumentation run may drive that AVD at a time. `androidx.test` connects a
+`UiAutomation` per run, so a second concurrent run — another terminal, an IDE run
+configuration, or a parallel agent session — fails with `UiAutomation ... already
+registered!` or `Not connected!` and truncates the test report. The symptom looks like a
+flaky test, including in tests that never touch UiAutomation themselves. Before
+investigating such a failure, confirm no other session is using the emulator, then re-run
+and check that the report lists the full test count.
+
 This checkout uses the untracked `local.properties` file to set `sdk.dir=/home/bobi/Android/Sdk`. Do not commit `local.properties`; another checkout can use `ANDROID_HOME` or its own local SDK path instead.
 
 The Android-free fare-core sources and JUnit tests compile and run successfully with the bundled Kotlin compiler/JBR. The Gradle `test connectedDebugAndroidTest` tasks also pass against the API 35 AVD, including Room transaction, recreation, retention, idempotence, and schema-fixture coverage.
