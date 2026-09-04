@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Single-tone silhouette for themed (Material You) launcher icons; tint is applied by the system. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <path
+        android:fillColor="#FF000000"
+        android:pathData="M32,52 L32,38 A22,15 0 0 1 76,38 L76,52 L78,52 L78,64 L84,64 Q54,82 24,64 L30,64 L30,52 Z" />
+    <path
+        android:fillColor="#FF000000"
+        android:pathData="M50.8,29 A3.2,3.2 0 1 0 57.2,29 A3.2,3.2 0 1 0 50.8,29 Z" />
+</vector>
