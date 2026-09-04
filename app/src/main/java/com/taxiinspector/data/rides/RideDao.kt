@@ -6,6 +6,8 @@ import androidx.room.OnConflictStrategy
 import androidx.room.Query
 import androidx.room.Transaction
 import com.taxiinspector.ride.RideEngine
+import com.taxiinspector.ride.RidePhase
+import com.taxiinspector.ride.TrackingStatus
 import kotlinx.coroutines.flow.Flow
 
 @Dao
@@ -56,6 +58,15 @@ abstract class RideDao {
         trimHistoryToTen()
     }
 
+    /** Atomically makes interrupted recovery safe to retry or invoke concurrently. */
+    @Transaction
+    open suspend fun saveInterruptedRide(summary: RideSummaryEntity) {
+        if (summary(summary.id) != null) return
+        insertSummary(summary)
+        deleteActiveRide(summary.id)
+        trimHistoryToTen()
+    }
+
     @Transaction
     open suspend fun startRide(id: String, nowElapsedMillis: Long): ActiveRideEntity {
         check(activeRide() == null) { "A ride is already active." }
@@ -63,5 +74,26 @@ abstract class RideDao {
         val activeRide = RideEngine.start(id, tariff, nowElapsedMillis).toEntity()
         upsertActiveRide(activeRide)
         return activeRide
+    }
+
+    /** Called only after binding has confirmed that no live service owns this Running ride. */
+    @Transaction
+    open suspend fun markRunningRideInterrupted(id: String): ActiveRideEntity? {
+        val current = activeRide() ?: return null
+        if (current.id != id || current.phase != RidePhase.Running.name) return current
+
+        val interrupted = current.toDomain().copy(
+            phase = RidePhase.PendingInterrupted,
+            trackingStatus = TrackingStatus.GpsLost,
+            lastAcceptedFixElapsedMillis = null,
+            lastFreshBillableReceivedElapsedMillis = null,
+            lastBillablePoint = null,
+            lastSpeedMetersPerSecond = null,
+            lastSpeedReceivedElapsedMillis = null,
+            lowSpeedCandidateMillis = 0,
+            highSpeedCandidateMillis = 0,
+        ).toEntity()
+        upsertActiveRide(interrupted)
+        return interrupted
     }
 }

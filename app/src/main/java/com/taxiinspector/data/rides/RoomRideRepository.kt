@@ -17,6 +17,10 @@ class RoomRideRepository(private val dao: RideDao) {
         rows.map(RideSummaryEntity::toDomain)
     }
 
+    suspend fun currentTariff(): Tariff? = dao.settings()?.toDomainTariff()
+
+    suspend fun currentActiveRide(): ActiveRide? = dao.activeRide()?.toDomain()
+
     suspend fun saveTariff(tariff: Tariff) {
         check(dao.activeRide() == null) { "Tariffs cannot change during a ride." }
         dao.upsertSettings(tariff.toEntity())
@@ -37,8 +41,7 @@ class RoomRideRepository(private val dao: RideDao) {
 
     /** Saving recovery is idempotent; a prior successful save is left unchanged. */
     suspend fun saveInterrupted(summary: RideSummary, endedAtUtcMillis: Long) {
-        if (dao.summary(summary.id) != null) return
-        dao.finishRide(
+        dao.saveInterruptedRide(
             SavedRideSummary(
                 summary.copy(status = RideSummary.Status.Interrupted),
                 endedAtUtcMillis,
@@ -46,7 +49,14 @@ class RoomRideRepository(private val dao: RideDao) {
         )
     }
 
+    suspend fun deleteSummary(id: String) {
+        dao.deleteSummary(id)
+    }
+
     suspend fun discardActiveRide(id: String) {
         dao.deleteActiveRide(id)
     }
+
+    suspend fun markRunningRideInterrupted(id: String): ActiveRide? =
+        dao.markRunningRideInterrupted(id)?.toDomain()
 }

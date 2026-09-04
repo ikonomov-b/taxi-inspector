@@ -59,6 +59,7 @@ If a current-state statement conflicts with `build-status.md`, `build-status.md`
 - When a change finishes, blocks, or materially advances a phase, update `docs/build-status.md` in the same change. Do not duplicate live progress in the index or memory.
 - Preserve existing user changes. Do not reset, checkout, or delete unrelated work.
 - After a material implementation phase, run the relevant tests and update `docs/build-status.md` with the command and result.
+- After every phase, review all repository documents against the document-authority table and update every affected document in the same change. At minimum, update `docs/build-status.md`; update `docs/project-index.md` for source/navigation changes, `docs/development-environment.md` for tooling changes, `docs/project-memory.md` for durable decisions or verified environment facts, and the design/structure/plan documents when their contracts changed. Keep live progress exclusively in `docs/build-status.md`.
 
 ## Local verification
 

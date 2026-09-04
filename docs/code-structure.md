@@ -67,7 +67,9 @@ Prefer fakes over mocking: `FakeLocationClient`, `FakeClock`, and fake repositor
 - **No floating-point money library:** `BigDecimal` is in the platform and directly expresses the planned exact-decimal tariff-unit rules.
 - **No Hilt, DataStore, multi-module, or generic clean-architecture framework:** one app module, one Room database, and an explicit application container are clearer at this scale.
 
-## Package layout
+## Target package layout
+
+This tree is the intended end-state layout after the remaining implementation phases. It is not a claim that every listed file already exists. Before adding or changing code, use `project-index.md` to find the current source and `build-status.md` to determine the active phase.
 
 ```text
 app/
@@ -88,7 +90,6 @@ app/
     │   │   │   ├── RideSummary.kt
     │   │   │   ├── RidePhase.kt
     │   │   │   ├── TrackingStatus.kt
-    │   │   │   ├── RideSummaryStatus.kt
     │   │   │   ├── LocationSample.kt
     │   │   │   ├── FareCalculator.kt
     │   │   │   ├── RideEngine.kt
@@ -101,13 +102,18 @@ app/
     │   │   │   │   ├── RideSummaryEntity.kt
     │   │   │   │   ├── RideDao.kt
     │   │   │   │   ├── RoomRideRepository.kt
-    │   │   │   │   └── RoomConverters.kt
+    │   │   │   │   └── RideMappers.kt
     │   │   │   └── location/
     │   │   │       ├── LocationClient.kt
     │   │   │       └── AndroidGpsLocationClient.kt
     │   │   ├── tracking/
     │   │   │   ├── RideTrackingService.kt
+    │   │   │   ├── RideTrackingController.kt
     │   │   │   ├── RideCommand.kt
+    │   │   │   ├── RideTrackingState.kt
+    │   │   │   ├── TrackingPrerequisites.kt
+    │   │   │   ├── RideRecoveryCoordinator.kt
+    │   │   │   ├── RideServiceCommandRouter.kt
     │   │   │   └── RideNotificationFactory.kt
     │   │   ├── ui/
     │   │   │   ├── TaxiInspectorApp.kt
@@ -170,7 +176,7 @@ The database has an explicit version and forward migrations. Destructive migrati
 
 It also has `start(tariff, now)` and `finish(activeRide, now)` functions. Inputs include `Pause`, `Resume`, `LocationReceived`, `Tick`, `GpsTimedOut`, and `PermissionRevoked`. The engine only changes fare/session values. `Tick` may charge only a completed eligible elapsed interval backed by a fresh billable speed; it never makes a lost or weak GPS period billable. The service handles Android effects—starting/stopping location, saving the resulting snapshot, and updating/removing the notification. Keeping the engine Android-free makes the 15-second GPS timeout, movement thresholds, fare rules, discard, and pre-ride reset behaviour unit-testable without an effect framework.
 
-`RideTrackingService` owns the one mutable active session. It serializes GPS callbacks, ticker ticks, and commands in one coroutine, passes inputs to `RideEngine`, persists changed state, and publishes a `StateFlow` through the repository. No ViewModel, DAO callback, or composable is allowed to mutate an active ride.
+`RideTrackingService` owns `RideTrackingController`, the one mutable in-memory active session. The controller serializes GPS callbacks, ticker ticks, and commands through one channel/coroutine, passes inputs to `RideEngine`, persists changed state, and exposes non-coordinate ownership/status through the service binder. No ViewModel, DAO callback, or composable is allowed to mutate an active ride.
 
 ## Background tracking flow
 

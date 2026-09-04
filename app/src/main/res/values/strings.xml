@@ -1,0 +1,14 @@
+<resources>
+    <string name="tracking_channel_name">Active ride</string>
+    <string name="tracking_channel_description">Shows the current fare estimate while GPS tracking is active.</string>
+    <string name="tracking_notification_title">Taxi Inspector</string>
+    <string name="tracking_notification_starting">Preparing GPS tracking…</string>
+    <string name="tracking_notification_total">Estimated total: %1$s</string>
+    <string name="action_pause">Pause</string>
+    <string name="action_stop_save">Stop &amp; save</string>
+    <string name="gps_status_searching">GPS searching — fare frozen</string>
+    <string name="gps_status_good">GPS good</string>
+    <string name="gps_status_weak">GPS weak — fare frozen</string>
+    <string name="gps_status_lost">GPS lost — fare frozen</string>
+    <string name="gps_status_permission_needed">Location permission needed — fare frozen</string>
+</resources>

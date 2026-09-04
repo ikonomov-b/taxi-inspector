@@ -21,8 +21,19 @@ The Android SDK is installed at `/home/bobi/Android/Sdk` with:
 - Android SDK Platform 35;
 - Android SDK Build-Tools 35.0.0 (and 34.0.0, installed by the Android Gradle Plugin);
 - Android SDK Platform-Tools; and
+- Android Emulator 37.1.11;
+- the API 35 default x86_64 system image; and
 - Android command-line tools at `/home/bobi/Android/Sdk/cmdline-tools/latest`.
+
+The local `taxi-inspector-api35` AVD uses that API 35 x86_64 image. KVM acceleration is available and the AVD has completed a successful headless boot. It can be started for instrumentation with:
+
+```bash
+/home/bobi/Android/Sdk/emulator/emulator \
+  -avd taxi-inspector-api35 \
+  -no-window -no-audio -no-boot-anim \
+  -gpu swiftshader_indirect -no-snapshot
+```
 
 This checkout uses the untracked `local.properties` file to set `sdk.dir=/home/bobi/Android/Sdk`. Do not commit `local.properties`; another checkout can use `ANDROID_HOME` or its own local SDK path instead.
 
-The Android-free fare-core sources and JUnit tests compile and run successfully with the bundled Kotlin compiler/JBR. The complete Gradle `test` task also passed with this SDK configuration.
+The Android-free fare-core sources and JUnit tests compile and run successfully with the bundled Kotlin compiler/JBR. The Gradle `test connectedDebugAndroidTest` tasks also pass against the API 35 AVD, including Room transaction, recreation, retention, idempotence, and schema-fixture coverage.
