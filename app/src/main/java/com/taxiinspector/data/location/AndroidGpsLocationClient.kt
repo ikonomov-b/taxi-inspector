@@ -10,6 +10,7 @@ import android.os.Build
 import android.os.Handler
 import android.os.Looper
 import android.os.SystemClock
+import android.util.Log
 import com.taxiinspector.ride.LocationSample
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.TimeUnit
@@ -41,6 +42,14 @@ class AndroidGpsLocationClient internal constructor(
         val statusListener = GnssStatusListener { carrierFrequenciesHz ->
             observedBand = GnssBandClassifier.classify(carrierFrequenciesHz)
             observedElapsedMillis = receivedElapsedRealtimeMillis()
+            if (Log.isLoggable(FIELD_TAG, Log.DEBUG)) {
+                Log.d(
+                    FIELD_TAG,
+                    "status band=$observedBand " +
+                        "l5=${GnssBandClassifier.l5SignalCount(carrierFrequenciesHz)} " +
+                        "of=${carrierFrequenciesHz.size} signals used in fix",
+                )
+            }
         }
 
         val listener = object : LocationListener {
@@ -50,7 +59,10 @@ class AndroidGpsLocationClient internal constructor(
                     ?.takeIf { receivedElapsedMillis - it in 0..BAND_FRESHNESS_MILLIS }
                     ?.let { observedBand }
                     ?: LocationSample.Band.Unknown
-                location.toDomainSample(receivedElapsedMillis, band)?.let { trySend(it) }
+                location.toDomainSample(receivedElapsedMillis, band)?.let {
+                    logFieldQuality(it)
+                    trySend(it)
+                }
             }
         }
 
@@ -76,6 +88,24 @@ class AndroidGpsLocationClient internal constructor(
 
         /** Mirrors RideEngine's own five-second freshness rule for location data. */
         const val BAND_FRESHNESS_MILLIS = 5_000L
+
+        /**
+         * Field diagnostics for real-device GNSS runs. Silent unless switched on for a
+         * session with `adb shell setprop log.tag.TaxiGnss DEBUG`, since a tag defaults to
+         * INFO. Never logs coordinates -- only the quality of a fix, never its position.
+         */
+        const val FIELD_TAG = "TaxiGnss"
+
+        fun logFieldQuality(sample: LocationSample) {
+            if (!Log.isLoggable(FIELD_TAG, Log.DEBUG)) return
+            Log.d(
+                FIELD_TAG,
+                "fix band=${sample.band} accuracy=${sample.accuracyMeters}m " +
+                    "speed=${sample.speedMetersPerSecond} " +
+                    "speedAccuracy=${sample.speedAccuracyMetersPerSecond} " +
+                    "mock=${sample.isMock}",
+            )
+        }
     }
 }
 

@@ -36,9 +36,13 @@ internal object GnssBandClassifier {
      */
     fun classify(carrierFrequenciesHz: List<Float>): LocationSample.Band = when {
         carrierFrequenciesHz.isEmpty() -> LocationSample.Band.Unknown
-        carrierFrequenciesHz.count { isL5Class(it) } >= MINIMUM_L5_SIGNALS -> LocationSample.Band.Dual
+        l5SignalCount(carrierFrequenciesHz) >= MINIMUM_L5_SIGNALS -> LocationSample.Band.Dual
         else -> LocationSample.Band.Single
     }
+
+    /** Exposed so field logging can show how much margin a fix had over [MINIMUM_L5_SIGNALS]. */
+    fun l5SignalCount(carrierFrequenciesHz: List<Float>): Int =
+        carrierFrequenciesHz.count { isL5Class(it) }
 
     private fun isL5Class(carrierFrequencyHz: Float): Boolean =
         abs(carrierFrequencyHz.toDouble() - L5_CENTRE_HZ) <= TOLERANCE_HZ
