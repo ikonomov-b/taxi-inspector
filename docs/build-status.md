@@ -26,7 +26,7 @@ JAVA_HOME=/opt/android-studio-for-platform/jbr \
 BUILD SUCCESSFUL
 ```
 
-The debug JVM report contains 22 tests and the API 35 instrumentation report contains 63 Room/location/service/UI tests, with 0 failures, 0 errors, and 0 skipped tests. Lint reported 0 errors. The same instrumentation run on a physical Pixel 8 Pro (Android 17) passes 46 of 63; the 17 failures are every Compose UI test, all failing inside Espresso rather than in app code (see risk 8).
+The debug JVM report contains 22 tests and the API 35 instrumentation report contains 63 Room/location/service/UI tests, with 0 failures, 0 errors, and 0 skipped tests. Lint reported 0 errors. The same 63 instrumentation tests now also pass on a physical Pixel 8 Pro (Android 17), with no failures.
 
 ## Phase tracker
 
@@ -102,7 +102,7 @@ The debug JVM report contains 22 tests and the API 35 instrumentation report con
 5. The database is still version 1, so the migration fixture validates the exported baseline but cannot exercise a forward migration until a future schema version exists.
 6. The local Android SDK path is machine-specific and remains in ignored `local.properties`; it must never be committed.
 7. Dual-band detection is now confirmed on real hardware (see the second Phase 4 amendment), but the 2.5 m movement floor itself has still never been exercised. The floor is `max(2.5 m, each endpoint's accuracy)`, and the measured accuracy at a window was 4.5 m, so the accuracy term dominated and the tighter floor never bound. It only binds below 2.5 m reported accuracy, which needs open sky. Note that a stationary hold cannot test it either: distance accrues only while the engine is Moving, so a parked vehicle bills nothing whatever the floor is. The discriminating test is steady slow movement at roughly 3 m/s over a measured distance, where 1 Hz segments of about 3 m fall between the two floors.
-8. Compose UI tests cannot run on Android 17. Every one of them fails there with `NoSuchMethodException: android.hardware.input.InputManager.getInstance` raised inside `androidx.test.espresso.Espresso.onIdle`, an AndroidX Test incompatibility with the newer platform rather than an app fault; the same tests pass on the API 35 emulator, and the other 46 instrumentation tests pass on the device. Real-device UI validation in Phase 8 is blocked until the `androidx.test`/Espresso versions in `gradle/libs.versions.toml` are raised.
+8. Instrumentation on a physical device needs preparation the emulator does not: animations disabled and the screen held awake, or Compose tests fail intermittently with `No compose hierarchies found in the app`. The commands are in `development-environment.md`. This is a runner caveat rather than an app defect, but it will bite anyone repeating the Phase 8 device runs.
 
 ## Next phase gate
 
@@ -278,11 +278,34 @@ Why it mattered:
 Verification:
 - Command: `GRADLE_USER_HOME=/tmp/taxi-inspector-gradle JAVA_HOME=/opt/android-studio-for-platform/jbr ./gradlew --no-daemon test lintDebug` then `ANDROID_SERIAL=emulator-5554 ... connectedDebugAndroidTest`
 - Result: `BUILD SUCCESSFUL`; 22 debug JVM tests and 63 API 35 instrumentation tests passed, lint reported 0 errors.
-- The same instrumentation run against the Pixel 8 Pro passes 46 of 63; the 17 failures are every Compose UI test and are an Espresso/Android 17 incompatibility, not an app fault (risk 8).
+- The same instrumentation run against the Pixel 8 Pro passed 46 of 63 at the time; the 17 failures were every Compose UI test, an Espresso/Android 17 incompatibility rather than an app fault, resolved by the tooling amendment below.
 
 Remaining risk or next gate:
 - The 2.5 m floor is still unexercised; see risk 7 for the test that would exercise it.
 - Running `connectedDebugAndroidTest` with both the emulator and a phone attached targets both, so a locked phone or the Espresso incompatibility fails the whole task. Pass `ANDROID_SERIAL` to choose one.
+
+### Tooling amendment — Espresso 3.7.0 unblocks real-device UI tests
+
+Status: Complete
+Date: 2026-09-04
+Delivered:
+- Pinned `androidx.test.espresso:espresso-core` to 3.7.0 in the version catalog and added it as an explicit `androidTestImplementation`. The Compose BOM resolves espresso 3.5.0 transitively, and nothing else in the build raised it.
+- Raised `androidx.test` core/rules to 1.7.0, runner to 1.7.0, and `androidx.test.ext:junit` to 1.3.0 to match.
+- Pinned `scripts/test-instrumented.sh` to the emulator with `ANDROID_SERIAL`. `connectedDebugAndroidTest` enrols every attached device, so a phone connected for field testing silently joined the run and failed it.
+- Documented the physical-device preparation in `development-environment.md`.
+
+Why it mattered:
+- Espresso before 3.7.0 obtained the input manager through a reflective `InputManager.getInstance()`, which Android 16 removed. On an Android 17 device every Compose UI test failed in `Espresso.onIdle` with `NoSuchMethodException`, which is 17 of the 63 instrumentation tests. Espresso 3.7.0 uses `getSystemService` instead.
+- That blocked real-device UI validation entirely, which Phase 8 depends on.
+
+Verification:
+- Command: `ANDROID_SERIAL=39261FDJG006MZ ... ./gradlew --no-daemon connectedDebugAndroidTest` on a Pixel 8 Pro (Android 17)
+- Result: `BUILD SUCCESSFUL`; 63 of 63 passed, up from 46.
+- Emulator unaffected: `ANDROID_SERIAL=emulator-5554 ... test lintDebug connectedDebugAndroidTest` passes 22 JVM and 63 instrumentation tests with 0 lint errors.
+- The upgrade alone took the device from 17 failures to two; the remaining two were the screen timing out mid-run, and disabling animations plus `svc power stayon true` cleared them. Both steps are needed, and neither is a code fault.
+
+Remaining risk or next gate:
+- Compose BOM 2024.12.01 still resolves espresso 3.5.0, so the explicit pin must stay until a BOM ships a version at or above 3.7.0. Removing it would silently reintroduce the failure on modern devices.
 
 ## Update template
 

@@ -10,9 +10,13 @@ composeBom = "2024.12.01"
 coroutines = "1.9.0"
 room = "2.6.1"
 junit = "4.13.2"
-androidxTestCore = "1.6.1"
-androidxTestExtJunit = "1.2.1"
-androidxTestRunner = "1.6.2"
+androidxTestCore = "1.7.0"
+androidxTestExtJunit = "1.3.0"
+androidxTestRunner = "1.7.0"
+# Pinned ahead of the Compose BOM, which still resolves espresso 3.5.0. Espresso 3.7.0
+# stopped reaching InputManager.getInstance reflectively, which no longer exists on
+# Android 16 and later, and every Compose UI test fails on such a device without it.
+espresso = "3.7.0"
 
 [libraries]
 androidx-core-ktx = { module = "androidx.core:core-ktx", version.ref = "coreKtx" }
@@ -38,6 +42,7 @@ androidx-test-core-ktx = { module = "androidx.test:core-ktx", version.ref = "and
 androidx-test-ext-junit-ktx = { module = "androidx.test.ext:junit-ktx", version.ref = "androidxTestExtJunit" }
 androidx-test-runner = { module = "androidx.test:runner", version.ref = "androidxTestRunner" }
 androidx-test-rules = { module = "androidx.test:rules", version.ref = "androidxTestCore" }
+androidx-test-espresso-core = { module = "androidx.test.espresso:espresso-core", version.ref = "espresso" }
 junit = { module = "junit:junit", version.ref = "junit" }
 
 [plugins]

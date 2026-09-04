@@ -6,7 +6,9 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 source scripts/lib.sh
 
-ensure_emulator_running >/dev/null
+serial="$(ensure_emulator_running)"
 
-echo "Running connectedDebugAndroidTest..."
-./gradlew --no-daemon connectedDebugAndroidTest
+echo "Running connectedDebugAndroidTest on $serial..."
+# Pinned deliberately: connectedDebugAndroidTest enrols every attached device, so a
+# phone plugged in for field testing would otherwise join the run and fail it.
+ANDROID_SERIAL="$serial" ./gradlew --no-daemon connectedDebugAndroidTest
