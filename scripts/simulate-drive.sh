@@ -1,8 +1,11 @@
 #!/usr/bin/env bash
-# Black-box simulation of a ~1 minute realistic taxi ride: installs a clean
-# copy of the app, enters a tariff, starts a ride, feeds a realistic GPS
-# driving path (pull away, cruise, stop at a light, cruise, stop) into the
-# emulator's real GPS provider, then stops & saves.
+# Black-box simulation of a ~2 minute taxi ride: installs a clean copy of the
+# app, enters a tariff, starts a ride, feeds a deterministic GPS path (drive
+# 60s at a constant 50 km/h, then sit stationary for 60s) into the emulator's
+# real GPS provider, stops & saves, then checks the distance/idle time/fare
+# the app persisted against what RideEngine's own rules predict for that
+# exact profile (see scripts/check_ride_result.py) -- failing loudly if the
+# app's math doesn't match, rather than just eyeballing the final screen.
 #
 # This drives only the real UI (via uiautomator) and the real GPS provider
 # (via the emulator console) -- it never calls the app's Kotlin code
@@ -62,12 +65,8 @@ echo "Starting the ride..."
 python3 "$SCRIPT_DIR/ui_dump.py" --serial "$serial" tap-text "Start ride"
 sleep 1
 
-echo "Simulating ~60s of realistic driving (pull away, cruise, stop at a light, cruise, stop)..."
+echo "Driving 60s at a constant 50 km/h, then sitting stationary for 60s..."
 python3 "$SCRIPT_DIR/drive_profile.py" --serial "$serial"
 
-echo "Stopping and saving the ride..."
-python3 "$SCRIPT_DIR/ui_dump.py" --serial "$serial" tap-text "Stop & save"
-sleep 1
-
-echo "Final screen:"
-python3 "$SCRIPT_DIR/ui_dump.py" --serial "$serial" list
+echo "Stopping, saving, and checking the app's distance/idle/fare math..."
+python3 "$SCRIPT_DIR/check_ride_result.py" --serial "$serial"
