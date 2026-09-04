@@ -7,6 +7,10 @@ AVD_NAME="${AVD_NAME:-taxi-inspector-api35}"
 ADB="$SDK_DIR/platform-tools/adb"
 EMULATOR="$SDK_DIR/emulator/emulator"
 
+# So helper scripts (Python included) can call plain `adb`/`emulator` and
+# resolve to the same binaries as $ADB/$EMULATOR above.
+export PATH="$SDK_DIR/platform-tools:$SDK_DIR/emulator:$PATH"
+
 # The system default `java` here is a stale JDK 8 whose cert store can't
 # validate services.gradle.org, breaking the wrapper download. Prefer Android
 # Studio's bundled JBR (documented in docs/development-environment.md) unless

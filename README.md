@@ -38,6 +38,8 @@ Run unit tests and lint together:
 
 The verified local environment and Android Studio setup are documented in [`docs/development-environment.md`](docs/development-environment.md). The same test and lint commands run in [GitHub Actions](.github/workflows/android.yml).
 
+Scripts under [`scripts/`](scripts/) wrap common emulator workflows: booting the AVD and installing/launching the app, mirroring CI locally, running instrumented tests, and a black-box simulated-drive test that feeds a realistic GPS route into a real emulator. See the "Helper scripts" section of [`docs/development-environment.md`](docs/development-environment.md) for details and current caveats.
+
 ## Architecture
 
 The repository is a single Android application module:

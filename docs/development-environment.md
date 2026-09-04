@@ -45,3 +45,15 @@ and check that the report lists the full test count.
 This checkout uses the untracked `local.properties` file to set `sdk.dir=/home/bobi/Android/Sdk`. Do not commit `local.properties`; another checkout can use `ANDROID_HOME` or its own local SDK path instead.
 
 The Android-free fare-core sources and JUnit tests compile and run successfully with the bundled Kotlin compiler/JBR. The Gradle `test connectedDebugAndroidTest` tasks also pass against the API 35 AVD, including Room transaction, recreation, retention, idempotence, and schema-fixture coverage.
+
+## Helper scripts (`scripts/`)
+
+`scripts/lib.sh` is sourced by the scripts below: it resolves `$ADB`/`$EMULATOR` from `ANDROID_HOME` (falling back to the SDK path above), puts `platform-tools`/`emulator` on `PATH` for child processes (Python included), points `JAVA_HOME` at the Android Studio JBR when the caller hasn't set one (the system default `java` here is a stale JDK 8 whose cert store can't validate `services.gradle.org`, which otherwise breaks the Gradle wrapper download), and exposes `ensure_emulator_running`, which starts `taxi-inspector-api35` if no emulator is already up and waits for boot, or reuses one that's already running.
+
+- `scripts/run-emulator.sh` — builds and installs the debug APK on the emulator (starting it if needed) and launches `MainActivity`.
+- `scripts/check.sh` — mirrors the CI verify job (`test lintDebug`) locally; needs no emulator.
+- `scripts/test-instrumented.sh` — runs `connectedDebugAndroidTest` against the emulator.
+- `scripts/simulate-drive.sh` — a black-box ~60s simulated ride (start → moving → still → moving → stop): installs a clean app copy, seeds a tariff, taps "Start ride" through `uiautomator`, feeds a realistic accelerate/cruise/stop-at-a-light/cruise/stop GPS path into the emulator's real GPS provider via `adb emu geo fix` (`scripts/drive_profile.py`), then taps "Stop & save". It drives only the real UI and the real GPS provider — never the app's Kotlin code — so it exercises the full on-device stack. `scripts/ui_dump.py` is the `uiautomator`-dump-and-tap helper it shares with the tariff-entry-by-UI path (currently unused — see caveat below).
+  - **Caveat (remove once fixed):** the in-app tariff-entry screen's Save button is not wired up yet, so this script currently seeds the `app_settings` row directly into the Room database (`taxi-inspector.db`, schema in `app/schemas/com.taxiinspector.data.rides.TaxiInspectorDatabase/1.json`) via `adb root` + on-device `sqlite3`, bypassing that screen. Once Save tariff works, switch the script back to `ui_dump.py`'s `fill`/`tap-text "Save tariff"` calls (kept in that file, just unused) instead of the DB seed step.
+
+These scripts drive the same shared `taxi-inspector-api35` AVD as any manual instrumentation run, so the single-user-at-a-time caveat above applies to them too.

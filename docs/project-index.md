@@ -42,6 +42,7 @@ The safety priority is explainability: uncertain GPS data freezes billing rather
 | Android integration tests | `app/src/androidTest/java/com/taxiinspector/` | API 35 Room, GPS adapter, foreground service, notification action, recovery, Compose meter-screen, and meter state-holder tests. |
 | Room schema | `app/schemas/` | Versioned exported schema. Keep it updated with intentional schema changes. |
 | Android resources | `app/src/main/res/` | Vintage palette, launcher/notification resources, and every user-facing string. Visual refinement remains Phase 9 work. |
+| Local dev/emulator scripts | `scripts/` | Boot/install/launch, CI-mirroring check, instrumented-test runner, and a black-box simulated-drive test; see `development-environment.md`. |
 
 ## Current implementation status
 
