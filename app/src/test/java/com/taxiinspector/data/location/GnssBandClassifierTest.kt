@@ -8,7 +8,7 @@ class GnssBandClassifierTest {
     @Test
     fun `enough L5 class signals report dual band`() {
         // GPS L5, Galileo E5a, BeiDou B2a and QZSS L5 all centre on 1176.45 MHz.
-        val frequencies = List(4) { L5 } + List(8) { L1 }
+        val frequencies = List(3) { L5 } + List(8) { L1 }
 
         assertEquals(LocationSample.Band.Dual, GnssBandClassifier.classify(frequencies))
     }
@@ -30,7 +30,7 @@ class GnssBandClassifierTest {
 
     @Test
     fun `fewer L5 class signals than the minimum stays single band`() {
-        val frequencies = List(3) { L5 } + List(9) { L1 }
+        val frequencies = List(2) { L5 } + List(9) { L1 }
 
         assertEquals(LocationSample.Band.Single, GnssBandClassifier.classify(frequencies))
     }
@@ -42,7 +42,7 @@ class GnssBandClassifierTest {
 
     @Test
     fun `a carrier just inside the one megahertz tolerance still counts`() {
-        val frequencies = List(4) { L5 + 900_000f }
+        val frequencies = List(3) { L5 + 900_000f }
 
         assertEquals(LocationSample.Band.Dual, GnssBandClassifier.classify(frequencies))
     }

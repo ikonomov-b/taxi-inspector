@@ -39,7 +39,7 @@ class AndroidGpsLocationClient internal constructor(
         var observedBand = LocationSample.Band.Unknown
         var observedElapsedMillis: Long? = null
 
-        val statusListener = GnssStatusListener { carrierFrequenciesHz ->
+        val statusListener = GnssStatusListener { satellitesInView, carrierFrequenciesHz ->
             observedBand = GnssBandClassifier.classify(carrierFrequenciesHz)
             observedElapsedMillis = receivedElapsedRealtimeMillis()
             if (Log.isLoggable(FIELD_TAG, Log.DEBUG)) {
@@ -47,7 +47,8 @@ class AndroidGpsLocationClient internal constructor(
                     FIELD_TAG,
                     "status band=$observedBand " +
                         "l5=${GnssBandClassifier.l5SignalCount(carrierFrequenciesHz)} " +
-                        "of=${carrierFrequenciesHz.size} signals used in fix",
+                        "usedInFix=${carrierFrequenciesHz.size} " +
+                        "inView=$satellitesInView",
                 )
             }
         }
@@ -59,27 +60,30 @@ class AndroidGpsLocationClient internal constructor(
                     ?.takeIf { receivedElapsedMillis - it in 0..BAND_FRESHNESS_MILLIS }
                     ?.let { observedBand }
                     ?: LocationSample.Band.Unknown
-                location.toDomainSample(receivedElapsedMillis, band)?.let {
-                    logFieldQuality(it)
-                    trySend(it)
-                }
+                val sample = location.toDomainSample(receivedElapsedMillis, band)
+                if (sample == null) logDroppedFix(location) else logFieldQuality(sample)
+                sample?.let { trySend(it) }
             }
         }
 
-        // Registered first so that an early fix can already carry a band.
-        source.registerGnssStatus(statusListener)
         source.requestGpsUpdates(
             minTimeMillis = UPDATE_INTERVAL_MILLIS,
             minDistanceMeters = 0f,
             listener = listener,
         )
+        // Requested second, and tolerantly: knowing the band only refines the movement
+        // floor, so a receiver that refuses this subscription must still bill a ride. The
+        // cost of trailing the location request is that the first fix or two read Unknown,
+        // which is the conservative floor anyway.
+        runCatching { source.registerGnssStatus(statusListener) }
         awaitClose {
+            // Independently, so that a failure to release one still releases the other.
             try {
                 source.removeUpdates(listener)
-                source.removeGnssStatus(statusListener)
             } catch (_: SecurityException) {
                 // Permission may have been revoked immediately before cancellation.
             }
+            runCatching { source.removeGnssStatus(statusListener) }
         }
     }
 
@@ -96,6 +100,20 @@ class AndroidGpsLocationClient internal constructor(
          */
         const val FIELD_TAG = "TaxiGnss"
 
+        /**
+         * A fix the mapper refused leaves no other trace, so without this a dropped fix and a
+         * fix that never arrived look identical from the log.
+         */
+        fun logDroppedFix(location: Location) {
+            if (!Log.isLoggable(FIELD_TAG, Log.DEBUG)) return
+            Log.d(
+                FIELD_TAG,
+                "dropped fix provider=${location.provider} " +
+                    "hasAccuracy=${location.hasAccuracy()} " +
+                    "elapsedRealtimeNanos=${location.elapsedRealtimeNanos}",
+            )
+        }
+
         fun logFieldQuality(sample: LocationSample) {
             if (!Log.isLoggable(FIELD_TAG, Log.DEBUG)) return
             Log.d(
@@ -109,9 +127,9 @@ class AndroidGpsLocationClient internal constructor(
     }
 }
 
-/** Reports the carrier frequencies of the signals the receiver used in its latest fix. */
+/** Reports how many satellites are visible and the carrier frequencies used in the fix. */
 internal fun interface GnssStatusListener {
-    fun onSignalsUsedInFix(carrierFrequenciesHz: List<Float>)
+    fun onSatelliteStatus(satellitesInView: Int, carrierFrequenciesUsedInFix: List<Float>)
 }
 
 internal interface GpsLocationSource {
@@ -162,7 +180,10 @@ private class LocationManagerGpsLocationSource(
     override fun registerGnssStatus(listener: GnssStatusListener) {
         val callback = object : GnssStatus.Callback() {
             override fun onSatelliteStatusChanged(status: GnssStatus) {
-                listener.onSignalsUsedInFix(status.carrierFrequenciesUsedInFix())
+                listener.onSatelliteStatus(
+                    satellitesInView = status.satelliteCount,
+                    carrierFrequenciesUsedInFix = status.carrierFrequenciesUsedInFix(),
+                )
             }
         }
         gnssCallbacks[listener] = callback

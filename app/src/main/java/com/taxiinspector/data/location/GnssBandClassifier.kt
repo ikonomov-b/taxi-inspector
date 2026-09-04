@@ -24,10 +24,14 @@ internal object GnssBandClassifier {
     private const val TOLERANCE_HZ = 1_000_000.0
 
     /**
-     * Below this, the handful of L5 signals present are unlikely to have moved the
-     * solution enough to justify a tighter movement threshold.
+     * Below this, the handful of L5 signals present are unlikely to have moved the solution
+     * enough to justify a tighter movement threshold. Measured on a Pixel 8 Pro at a window
+     * on 2026-09-04: 48 satellites in view, 15 signals used in the fix, and an L5 count of 5
+     * on 38 samples, 4 on six, and 3 on one. Four left almost no margin, and losing the band
+     * costs little anyway, since a fix weak enough to drop L5 signals usually reports an
+     * accuracy that dominates the movement floor by itself.
      */
-    private const val MINIMUM_L5_SIGNALS = 4
+    private const val MINIMUM_L5_SIGNALS = 3
 
     /**
      * @param carrierFrequenciesHz carrier frequencies of the signals used in the fix, for

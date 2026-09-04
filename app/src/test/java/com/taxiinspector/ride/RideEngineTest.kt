@@ -213,6 +213,33 @@ class RideEngineTest {
         assertEquals(MotionState.Moving, motionAfterEightSeconds(speedAccuracy = 2.0))
     }
 
+    @Test
+    fun `a fast speed stays trusted however loose its reported accuracy`() {
+        // The coordinates never move, so a discarded speed would derive 0 m/s from the fixes
+        // and drop the engine into Idle within five seconds.
+        var ride = RideEngine.start("ride-1", tariff, 0)
+        for (second in 0 until 8) {
+            val now = second * 1_000L
+            ride = RideEngine.reduce(
+                ride,
+                RideInput.LocationReceived(
+                    bandedSample(
+                        meters = 0.0,
+                        elapsedMillis = now,
+                        speed = 15.0,
+                        band = LocationSample.Band.Single,
+                        speedAccuracy = 2.0,
+                    ),
+                    now,
+                ),
+            )
+            ride = RideEngine.reduce(ride, RideInput.Tick(now + 1_000))
+        }
+
+        assertEquals(MotionState.Moving, ride.motionState)
+        assertEquals(0, ride.idleMillis)
+    }
+
     private fun bandedSample(
         meters: Double,
         elapsedMillis: Long,

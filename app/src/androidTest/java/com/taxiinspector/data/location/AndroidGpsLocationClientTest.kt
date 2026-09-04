@@ -207,6 +207,25 @@ class AndroidGpsLocationClientTest {
         assertSame(registered, source.removedGnssListener)
     }
 
+    @Test
+    fun aRefusedSatelliteStatusSubscriptionStillDeliversFixes() = runBlocking {
+        val source = FakeGpsLocationSource(failGnssRegistration = true)
+        val client = AndroidGpsLocationClient(source) { 2_000L }
+        val received = Channel<LocationSample>(capacity = 1)
+        val collection = launch(start = CoroutineStart.UNDISPATCHED) {
+            client.locationSamples().collect { received.send(it) }
+        }
+        source.awaitSubscription()
+
+        source.emit(gpsFix())
+
+        // Knowing the band is a refinement; losing it must never cost us the ride.
+        val sample = withTimeout(1_000) { received.receive() }
+        assertEquals(LocationSample.Band.Unknown, sample.band)
+
+        collection.cancelAndJoin()
+    }
+
     private fun gpsFix(): Location = Location(LocationManager.GPS_PROVIDER).apply {
         latitude = 42.6977
         longitude = 23.3219
@@ -217,6 +236,7 @@ class AndroidGpsLocationClientTest {
 
     private class FakeGpsLocationSource(
         var isEnabled: Boolean = true,
+        private val failGnssRegistration: Boolean = false,
     ) : GpsLocationSource {
         var requestedMinTimeMillis: Long? = null
         var requestedMinDistanceMeters: Float? = null
@@ -244,6 +264,7 @@ class AndroidGpsLocationClientTest {
         }
 
         override fun registerGnssStatus(listener: GnssStatusListener) {
+            if (failGnssRegistration) throw IllegalStateException("no satellite status here")
             gnssListener = listener
         }
 
@@ -252,7 +273,10 @@ class AndroidGpsLocationClientTest {
         }
 
         fun emitGnssStatus(carrierFrequenciesHz: List<Float>) {
-            checkNotNull(gnssListener).onSignalsUsedInFix(carrierFrequenciesHz)
+            checkNotNull(gnssListener).onSatelliteStatus(
+                satellitesInView = carrierFrequenciesHz.size,
+                carrierFrequenciesUsedInFix = carrierFrequenciesHz,
+            )
         }
 
         fun emit(location: Location) {

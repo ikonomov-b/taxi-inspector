@@ -277,15 +277,24 @@ object RideEngine {
         }
 
     /**
-     * A reported speed whose own accuracy is wider than the Idle/Moving hysteresis band cannot
-     * place the vehicle on either side of it. Such a speed is treated as no reported speed at
-     * all, which drops the engine onto its existing derived-speed fallback.
+     * Android's reported speed is Doppler-derived and generally better than anything this
+     * engine can difference from two positions, so it is discarded only when it cannot answer
+     * the one question asked of it: which side of Idle entry or Moving exit the vehicle sits
+     * on. A speed is unusable only when its own uncertainty spans one of those thresholds --
+     * a vehicle at 15 m/s stays trusted however loose its speed accuracy.
+     *
+     * The bound is one reported speed accuracy, which Android defines at the 68th percentile.
+     * A wider interval would reject far more speeds exactly where reception is poor, and the
+     * engine's five- and three-second hysteresis already absorbs the noise one sigma leaves.
      */
-    private fun LocationSample.trustedSpeedMetersPerSecond(): Double? =
-        speedMetersPerSecond?.takeIf {
-            val accuracy = speedAccuracyMetersPerSecond
-            accuracy == null || accuracy <= MOVING_EXIT_SPEED - IDLE_ENTRY_SPEED
-        }
+    private fun LocationSample.trustedSpeedMetersPerSecond(): Double? {
+        val speed = speedMetersPerSecond ?: return null
+        val accuracy = speedAccuracyMetersPerSecond ?: return speed
+        val plausibleSpeeds = (speed - accuracy)..(speed + accuracy)
+        val straddlesAThreshold =
+            IDLE_ENTRY_SPEED in plausibleSpeeds || MOVING_EXIT_SPEED in plausibleSpeeds
+        return if (straddlesAThreshold) null else speed
+    }
 
     private fun distanceBetweenMeters(first: LocationSample, second: LocationSample): Double {
         val latitudeRadians = Math.toRadians(second.latitude - first.latitude)

@@ -26,7 +26,7 @@ JAVA_HOME=/opt/android-studio-for-platform/jbr \
 BUILD SUCCESSFUL
 ```
 
-The debug JVM report contains 21 tests and the API 35 instrumentation report contains 62 Room/location/service/UI tests, with 0 failures, 0 errors, and 0 skipped tests. Lint reported 0 errors.
+The debug JVM report contains 22 tests and the API 35 instrumentation report contains 63 Room/location/service/UI tests, with 0 failures, 0 errors, and 0 skipped tests. Lint reported 0 errors. The same instrumentation run on a physical Pixel 8 Pro (Android 17) passes 46 of 63; the 17 failures are every Compose UI test, all failing inside Espresso rather than in app code (see risk 8).
 
 ## Phase tracker
 
@@ -101,7 +101,8 @@ The debug JVM report contains 21 tests and the API 35 instrumentation report con
 4. Automated service tests use emulator/fake GPS inputs; real street, tunnel, and weak-signal field validation remains part of Phase 8.
 5. The database is still version 1, so the migration fixture validates the exported baseline but cannot exercise a forward migration until a future schema version exists.
 6. The local Android SDK path is machine-specific and remains in ignored `local.properties`; it must never be committed.
-7. The 2.5 m dual-band movement floor is reasoned, not measured. No emulator produces L5 satellite status, so every automated test reaches it through injected band values and `simulate-drive.sh` never exercises it at all. Confirm it on a dual-band handset in Phase 8 with a stationary hold, where distance must stay flat, and with a curved route, where the tighter floor should reduce the chord under-read. Fall back to 3 m if the hold drifts.
+7. Dual-band detection is now confirmed on real hardware (see the second Phase 4 amendment), but the 2.5 m movement floor itself has still never been exercised. The floor is `max(2.5 m, each endpoint's accuracy)`, and the measured accuracy at a window was 4.5 m, so the accuracy term dominated and the tighter floor never bound. It only binds below 2.5 m reported accuracy, which needs open sky. Note that a stationary hold cannot test it either: distance accrues only while the engine is Moving, so a parked vehicle bills nothing whatever the floor is. The discriminating test is steady slow movement at roughly 3 m/s over a measured distance, where 1 Hz segments of about 3 m fall between the two floors.
+8. Compose UI tests cannot run on Android 17. Every one of them fails there with `NoSuchMethodException: android.hardware.input.InputManager.getInstance` raised inside `androidx.test.espresso.Espresso.onIdle`, an AndroidX Test incompatibility with the newer platform rather than an app fault; the same tests pass on the API 35 emulator, and the other 46 instrumentation tests pass on the device. Real-device UI validation in Phase 8 is blocked until the `androidx.test`/Espresso versions in `gradle/libs.versions.toml` are raised.
 
 ## Next phase gate
 
@@ -253,6 +254,35 @@ Remaining risk or next gate:
 - A baseline recovered from an interrupted ride returns as `Unknown` because the band is deliberately not persisted, so one segment after recovery uses the 5 m floor. This avoids a schema version for a negligible effect.
 - Band is not yet visible in the UI, and a mocked fix currently reports `Weak` rather than a status of its own. Both need the band threaded through the persisted `ActiveRide` and a new `TrackingStatus` value.
 - Real-device confirmation of the 2.5 m floor is a Phase 8 gate (see risk 7).
+
+### Phase 4 amendment 2 — field validation on a Pixel 8 Pro, and two threshold corrections
+
+Status: Complete
+Date: 2026-09-04
+Delivered:
+- Fixed a defect in the speed-confidence gate. It tested only the reported speed accuracy and never the speed, so a vehicle at 15 m/s with +/-2 m/s speed accuracy had its speed discarded despite being unambiguously Moving. A speed is now refused only when its own uncertainty spans a decision threshold, meaning 0.8 or 1.3 m/s falls within one reported accuracy of it.
+- Lowered `MINIMUM_L5_SIGNALS` from 4 to 3 on measured evidence.
+- Widened the field diagnostics: the status line now reports satellites in view alongside the L5 and used-in-fix counts, and a fix the mapper refuses now logs `dropped fix` with the field that caused it. Without that second line, a dropped fix and a fix that never arrived were indistinguishable from the log.
+- Made the satellite-status subscription non-blocking: it is now requested after the location subscription rather than before it, and tolerantly, so a receiver that refuses it can still bill a ride. A regression test covers it.
+
+Field measurements (Pixel 8 Pro, Android 17, window sill, 45 samples at 1 Hz):
+- `inView=48`, `usedInFix=15`, `band=Dual`. Dual-band detection works on real hardware -- the first confirmation of the feature, since no emulator can synthesise L5 satellite status.
+- L5 count was 5 on 38 samples, 4 on six, and 3 on one. A minimum of 4 left almost no margin, hence the reduction to 3.
+- Reported accuracy held near 4.5 m; speed accuracy ranged 0.334-0.451 m/s while stationary, against the 0.5 m/s bound the old gate used. That gate would therefore have begun refusing speeds under only slightly worse conditions.
+- Indoors on a desk the same build logged `inView=0` for minutes and correctly reported `GPS searching`. An earlier report of the meter being stuck there was environmental: the receiver could not see a single satellite, while Google Maps showed a confident position from the fused provider, which this app deliberately does not use.
+
+Why it mattered:
+- Both refuted thresholds had been chosen by reasoning alone and were running within one sample of their limits in good conditions. The speed gate was worse than tight -- it was wrong, and it degraded exactly the weak reception it was meant to protect.
+- Android documents the reported speed as Doppler-derived and its accuracy at the 68th percentile. Preferring it over position differencing follows the platform's own guidance; discarding it wholesale did not.
+
+Verification:
+- Command: `GRADLE_USER_HOME=/tmp/taxi-inspector-gradle JAVA_HOME=/opt/android-studio-for-platform/jbr ./gradlew --no-daemon test lintDebug` then `ANDROID_SERIAL=emulator-5554 ... connectedDebugAndroidTest`
+- Result: `BUILD SUCCESSFUL`; 22 debug JVM tests and 63 API 35 instrumentation tests passed, lint reported 0 errors.
+- The same instrumentation run against the Pixel 8 Pro passes 46 of 63; the 17 failures are every Compose UI test and are an Espresso/Android 17 incompatibility, not an app fault (risk 8).
+
+Remaining risk or next gate:
+- The 2.5 m floor is still unexercised; see risk 7 for the test that would exercise it.
+- Running `connectedDebugAndroidTest` with both the emulator and a phone attached targets both, so a locked phone or the Espresso incompatibility fails the whole task. Pass `ANDROID_SERIAL` to choose one.
 
 ## Update template
 
