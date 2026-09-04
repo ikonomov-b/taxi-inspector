@@ -16,6 +16,7 @@ object RideEngine {
     private const val BILLING_ACCURACY_METERS = 20.0
     private const val WEAK_ACCURACY_METERS = 60.0
     private const val MINIMUM_SIGNIFICANT_MOVEMENT_METERS = 5.0
+    private const val DUAL_BAND_SIGNIFICANT_MOVEMENT_METERS = 2.5
     private const val MAXIMUM_SEGMENT_METERS = 1_500.0
     private const val FRESH_SAMPLE_MILLIS = 5_000L
     private const val GPS_LOSS_MILLIS = 15_000L
@@ -98,6 +99,9 @@ object RideEngine {
         nowElapsedMillis: Long,
     ): ActiveRide {
         if (ride.phase != RidePhase.Running) return ride
+        // A synthetic fix must never reach the fare: this app's output is meant to be
+        // evidence, and a mock provider can manufacture any distance it likes.
+        if (sample.isMock) return ride.copy(trackingStatus = TrackingStatus.Weak)
         if (sample.provider != LocationSample.Provider.Gps || sample.accuracyMeters > WEAK_ACCURACY_METERS) {
             return ride.copy(trackingStatus = TrackingStatus.Weak)
         }
@@ -120,7 +124,7 @@ object RideEngine {
             gapMillis != null && gapMillis in 1..GPS_LOSS_MILLIS &&
             segmentMeters != null && segmentMeters <= MAXIMUM_SEGMENT_METERS
         val significantMeters = previousBaseline?.let {
-            maxOf(MINIMUM_SIGNIFICANT_MOVEMENT_METERS, it.accuracyMeters, sample.accuracyMeters)
+            maxOf(significantMovementFloorMeters(it, sample), it.accuracyMeters, sample.accuracyMeters)
         }
         val isSignificantSegment = canUseSegment && segmentMeters!! >= significantMeters!!
         // Distance and waiting time are mutually exclusive: a vehicle the engine considers
@@ -138,7 +142,7 @@ object RideEngine {
         } else {
             null
         }
-        val usableSpeed = sample.speedMetersPerSecond ?: derivedSpeed
+        val usableSpeed = sample.trustedSpeedMetersPerSecond() ?: derivedSpeed
         val nextBaseline = when {
             previousBaseline == null -> sample
             gapMillis == null || gapMillis > GPS_LOSS_MILLIS -> sample
@@ -256,6 +260,32 @@ object RideEngine {
         highSpeedCandidateMillis = 0,
         motionState = MotionState.Moving,
     )
+
+    /**
+     * L5-class signals resolve movement a single-band fix cannot, so a dual-band segment may
+     * bill smaller steps. Both endpoints must be dual-band: the deadband covers noise at each
+     * end of the segment, and a baseline restored from persistence comes back as Unknown.
+     */
+    private fun significantMovementFloorMeters(
+        baseline: LocationSample,
+        sample: LocationSample,
+    ): Double =
+        if (baseline.band == LocationSample.Band.Dual && sample.band == LocationSample.Band.Dual) {
+            DUAL_BAND_SIGNIFICANT_MOVEMENT_METERS
+        } else {
+            MINIMUM_SIGNIFICANT_MOVEMENT_METERS
+        }
+
+    /**
+     * A reported speed whose own accuracy is wider than the Idle/Moving hysteresis band cannot
+     * place the vehicle on either side of it. Such a speed is treated as no reported speed at
+     * all, which drops the engine onto its existing derived-speed fallback.
+     */
+    private fun LocationSample.trustedSpeedMetersPerSecond(): Double? =
+        speedMetersPerSecond?.takeIf {
+            val accuracy = speedAccuracyMetersPerSecond
+            accuracy == null || accuracy <= MOVING_EXIT_SPEED - IDLE_ENTRY_SPEED
+        }
 
     private fun distanceBetweenMeters(first: LocationSample, second: LocationSample): Double {
         val latitudeRadians = Math.toRadians(second.latitude - first.latitude)

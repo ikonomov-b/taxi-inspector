@@ -133,6 +133,88 @@ class AndroidGpsLocationClientTest {
         collection.cancelAndJoin()
     }
 
+    @Test
+    fun l5SignalsSeenJustBeforeAFixMarkItDualBand() = runBlocking {
+        val source = FakeGpsLocationSource()
+        val client = AndroidGpsLocationClient(source) { 2_000L }
+        val received = Channel<LocationSample>(capacity = 1)
+        val collection = launch(start = CoroutineStart.UNDISPATCHED) {
+            client.locationSamples().collect { received.send(it) }
+        }
+        source.awaitSubscription()
+
+        source.emitGnssStatus(List(6) { L5_HZ } + List(10) { L1_HZ })
+        source.emit(gpsFix())
+
+        val sample = withTimeout(1_000) { received.receive() }
+        assertEquals(LocationSample.Band.Dual, sample.band)
+
+        collection.cancelAndJoin()
+    }
+
+    @Test
+    fun aBandObservedTooLongBeforeAFixIsNotAttachedToIt() = runBlocking {
+        val source = FakeGpsLocationSource()
+        var elapsedMillis = 0L
+        val client = AndroidGpsLocationClient(source) { elapsedMillis }
+        val received = Channel<LocationSample>(capacity = 1)
+        val collection = launch(start = CoroutineStart.UNDISPATCHED) {
+            client.locationSamples().collect { received.send(it) }
+        }
+        source.awaitSubscription()
+
+        source.emitGnssStatus(List(6) { L5_HZ })
+        elapsedMillis = 6_000L
+        source.emit(gpsFix())
+
+        val sample = withTimeout(1_000) { received.receive() }
+        assertEquals(LocationSample.Band.Unknown, sample.band)
+
+        collection.cancelAndJoin()
+    }
+
+    @Test
+    fun aFixWithNoSatelliteStatusStaysUnknownRatherThanSingleBand() = runBlocking {
+        val source = FakeGpsLocationSource()
+        val client = AndroidGpsLocationClient(source) { 2_000L }
+        val received = Channel<LocationSample>(capacity = 1)
+        val collection = launch(start = CoroutineStart.UNDISPATCHED) {
+            client.locationSamples().collect { received.send(it) }
+        }
+        source.awaitSubscription()
+
+        source.emit(gpsFix())
+
+        val sample = withTimeout(1_000) { received.receive() }
+        assertEquals(LocationSample.Band.Unknown, sample.band)
+
+        collection.cancelAndJoin()
+    }
+
+    @Test
+    fun cancellationRemovesTheGnssStatusListenerAsWellAsTheLocationListener() = runBlocking {
+        val source = FakeGpsLocationSource()
+        val client = AndroidGpsLocationClient(source) { 0 }
+
+        val collection = launch(start = CoroutineStart.UNDISPATCHED) {
+            client.locationSamples().collect()
+        }
+        source.awaitSubscription()
+        val registered = source.gnssListener
+
+        collection.cancelAndJoin()
+
+        assertSame(registered, source.removedGnssListener)
+    }
+
+    private fun gpsFix(): Location = Location(LocationManager.GPS_PROVIDER).apply {
+        latitude = 42.6977
+        longitude = 23.3219
+        accuracy = 4f
+        speed = 3f
+        elapsedRealtimeNanos = 1_000_000_000L
+    }
+
     private class FakeGpsLocationSource(
         var isEnabled: Boolean = true,
     ) : GpsLocationSource {
@@ -140,6 +222,8 @@ class AndroidGpsLocationClientTest {
         var requestedMinDistanceMeters: Float? = null
         var listener: LocationListener? = null
         var removedListener: LocationListener? = null
+        var gnssListener: GnssStatusListener? = null
+        var removedGnssListener: GnssStatusListener? = null
         private val subscriptionRequested = CompletableDeferred<Unit>()
 
         override fun isGpsProviderEnabled(): Boolean = isEnabled
@@ -159,6 +243,18 @@ class AndroidGpsLocationClientTest {
             removedListener = listener
         }
 
+        override fun registerGnssStatus(listener: GnssStatusListener) {
+            gnssListener = listener
+        }
+
+        override fun removeGnssStatus(listener: GnssStatusListener) {
+            removedGnssListener = listener
+        }
+
+        fun emitGnssStatus(carrierFrequenciesHz: List<Float>) {
+            checkNotNull(gnssListener).onSignalsUsedInFix(carrierFrequenciesHz)
+        }
+
         fun emit(location: Location) {
             checkNotNull(listener).onLocationChanged(location)
         }
@@ -166,5 +262,10 @@ class AndroidGpsLocationClientTest {
         suspend fun awaitSubscription() {
             withTimeout(1_000) { subscriptionRequested.await() }
         }
+    }
+
+    private companion object {
+        const val L1_HZ = 1_575_420_000f
+        const val L5_HZ = 1_176_450_000f
     }
 }

@@ -144,6 +144,93 @@ class RideEngineTest {
         assertEquals(movingMeters, ride.distanceMeters.toDouble(), 1.0)
     }
 
+    @Test
+    fun `a mock fix never becomes a billable baseline`() {
+        var ride = RideEngine.start("ride-1", tariff, 0)
+        ride = RideEngine.reduce(
+            ride,
+            RideInput.LocationReceived(
+                sample = sample(elapsedMillis = 0, accuracyMeters = 5.0, speed = 0.0)
+                    .copy(isMock = true),
+                nowElapsedMillis = 0,
+            ),
+        )
+
+        assertEquals(TrackingStatus.Weak, ride.trackingStatus)
+        assertNull(ride.lastBillablePoint)
+    }
+
+    @Test
+    fun `a dual band segment bills movement a single band segment discards as noise`() {
+        fun distanceAfterThreeMetreStep(band: LocationSample.Band): Double {
+            var ride = RideEngine.start("ride-1", tariff, 0)
+            ride = RideEngine.reduce(
+                ride,
+                RideInput.LocationReceived(bandedSample(0.0, 0, speed = 3.0, band = band), 0),
+            )
+            ride = RideEngine.reduce(
+                ride,
+                RideInput.LocationReceived(bandedSample(3.0, 1_000, speed = 3.0, band = band), 1_000),
+            )
+            return ride.distanceMeters.toDouble()
+        }
+
+        assertEquals(0.0, distanceAfterThreeMetreStep(LocationSample.Band.Single), 0.0)
+        assertEquals(0.0, distanceAfterThreeMetreStep(LocationSample.Band.Unknown), 0.0)
+        assertEquals(3.0, distanceAfterThreeMetreStep(LocationSample.Band.Dual), 0.1)
+    }
+
+    @Test
+    fun `a reported speed too coarse to resolve the hysteresis band is replaced by derived speed`() {
+        // The vehicle really covers 5 m per second while the provider insists it is stopped.
+        fun motionAfterEightSeconds(speedAccuracy: Double): MotionState {
+            var ride = RideEngine.start("ride-1", tariff, 0)
+            var travelled = 0.0
+            for (second in 0 until 8) {
+                val now = second * 1_000L
+                ride = RideEngine.reduce(
+                    ride,
+                    RideInput.LocationReceived(
+                        bandedSample(
+                            meters = travelled,
+                            elapsedMillis = now,
+                            speed = 0.0,
+                            band = LocationSample.Band.Single,
+                            speedAccuracy = speedAccuracy,
+                        ),
+                        now,
+                    ),
+                )
+                ride = RideEngine.reduce(ride, RideInput.Tick(now + 1_000))
+                travelled += 5.0
+            }
+            return ride.motionState
+        }
+
+        // Confident enough to place the vehicle below the idle threshold, so it is believed.
+        assertEquals(MotionState.Idle, motionAfterEightSeconds(speedAccuracy = 0.1))
+        // Wider than the 0.8-1.3 m/s band, so the engine derives 5 m/s from the fixes instead.
+        assertEquals(MotionState.Moving, motionAfterEightSeconds(speedAccuracy = 2.0))
+    }
+
+    private fun bandedSample(
+        meters: Double,
+        elapsedMillis: Long,
+        speed: Double,
+        band: LocationSample.Band,
+        speedAccuracy: Double? = null,
+    ) = LocationSample(
+        latitude = 42.6977 + meters / METERS_PER_DEGREE_LATITUDE,
+        longitude = 23.3219,
+        accuracyMeters = 2.0,
+        provider = LocationSample.Provider.Gps,
+        speedMetersPerSecond = speed,
+        fixElapsedMillis = elapsedMillis,
+        receivedElapsedMillis = elapsedMillis,
+        band = band,
+        speedAccuracyMetersPerSecond = speedAccuracy,
+    )
+
     /** Drives one 1 Hz fix and one tick per second at the given speed profile. */
     private fun drive(seconds: Int, speedAt: (Int) -> Double): ActiveRide {
         var ride = RideEngine.start("ride-1", tariff, 0)

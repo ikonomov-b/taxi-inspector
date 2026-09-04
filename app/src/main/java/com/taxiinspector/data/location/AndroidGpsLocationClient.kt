@@ -2,12 +2,16 @@ package com.taxiinspector.data.location
 
 import android.annotation.SuppressLint
 import android.content.Context
+import android.location.GnssStatus
 import android.location.Location
 import android.location.LocationListener
 import android.location.LocationManager
+import android.os.Build
+import android.os.Handler
 import android.os.Looper
 import android.os.SystemClock
 import com.taxiinspector.ride.LocationSample
+import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.TimeUnit
 import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.Flow
@@ -28,12 +32,30 @@ class AndroidGpsLocationClient internal constructor(
     override fun isGpsProviderEnabled(): Boolean = source.isGpsProviderEnabled()
 
     override fun locationSamples(): Flow<LocationSample> = callbackFlow {
+        // Satellite status arrives on its own callback rather than attached to a fix, so the
+        // latest observation is carried forward and applied to fixes received soon after it.
+        // Both callbacks are delivered on the main looper, so these need no synchronisation.
+        var observedBand = LocationSample.Band.Unknown
+        var observedElapsedMillis: Long? = null
+
+        val statusListener = GnssStatusListener { carrierFrequenciesHz ->
+            observedBand = GnssBandClassifier.classify(carrierFrequenciesHz)
+            observedElapsedMillis = receivedElapsedRealtimeMillis()
+        }
+
         val listener = object : LocationListener {
             override fun onLocationChanged(location: Location) {
-                location.toDomainSample(receivedElapsedRealtimeMillis())?.let { trySend(it) }
+                val receivedElapsedMillis = receivedElapsedRealtimeMillis()
+                val band = observedElapsedMillis
+                    ?.takeIf { receivedElapsedMillis - it in 0..BAND_FRESHNESS_MILLIS }
+                    ?.let { observedBand }
+                    ?: LocationSample.Band.Unknown
+                location.toDomainSample(receivedElapsedMillis, band)?.let { trySend(it) }
             }
         }
 
+        // Registered first so that an early fix can already carry a band.
+        source.registerGnssStatus(statusListener)
         source.requestGpsUpdates(
             minTimeMillis = UPDATE_INTERVAL_MILLIS,
             minDistanceMeters = 0f,
@@ -42,6 +64,7 @@ class AndroidGpsLocationClient internal constructor(
         awaitClose {
             try {
                 source.removeUpdates(listener)
+                source.removeGnssStatus(statusListener)
             } catch (_: SecurityException) {
                 // Permission may have been revoked immediately before cancellation.
             }
@@ -50,7 +73,15 @@ class AndroidGpsLocationClient internal constructor(
 
     private companion object {
         const val UPDATE_INTERVAL_MILLIS = 1_000L
+
+        /** Mirrors RideEngine's own five-second freshness rule for location data. */
+        const val BAND_FRESHNESS_MILLIS = 5_000L
     }
+}
+
+/** Reports the carrier frequencies of the signals the receiver used in its latest fix. */
+internal fun interface GnssStatusListener {
+    fun onSignalsUsedInFix(carrierFrequenciesHz: List<Float>)
 }
 
 internal interface GpsLocationSource {
@@ -63,11 +94,17 @@ internal interface GpsLocationSource {
     )
 
     fun removeUpdates(listener: LocationListener)
+
+    fun registerGnssStatus(listener: GnssStatusListener)
+
+    fun removeGnssStatus(listener: GnssStatusListener)
 }
 
 private class LocationManagerGpsLocationSource(
     private val locationManager: LocationManager,
 ) : GpsLocationSource {
+    private val gnssCallbacks = ConcurrentHashMap<GnssStatusListener, GnssStatus.Callback>()
+
     override fun isGpsProviderEnabled(): Boolean =
         locationManager.isProviderEnabled(LocationManager.GPS_PROVIDER)
 
@@ -90,9 +127,43 @@ private class LocationManagerGpsLocationSource(
     override fun removeUpdates(listener: LocationListener) {
         locationManager.removeUpdates(listener)
     }
+
+    @SuppressLint("MissingPermission")
+    override fun registerGnssStatus(listener: GnssStatusListener) {
+        val callback = object : GnssStatus.Callback() {
+            override fun onSatelliteStatusChanged(status: GnssStatus) {
+                listener.onSignalsUsedInFix(status.carrierFrequenciesUsedInFix())
+            }
+        }
+        gnssCallbacks[listener] = callback
+        locationManager.registerGnssStatusCallback(callback, Handler(Looper.getMainLooper()))
+    }
+
+    override fun removeGnssStatus(listener: GnssStatusListener) {
+        gnssCallbacks.remove(listener)?.let(locationManager::unregisterGnssStatusCallback)
+    }
 }
 
-private fun Location.toDomainSample(receivedElapsedMillis: Long): LocationSample? {
+/**
+ * Carrier frequency is only readable from API 26; on older devices this is empty and the
+ * band stays Unknown, which the engine treats exactly as single-band.
+ */
+private fun GnssStatus.carrierFrequenciesUsedInFix(): List<Float> {
+    if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return emptyList()
+
+    val frequencies = ArrayList<Float>(satelliteCount)
+    for (index in 0 until satelliteCount) {
+        if (!usedInFix(index)) continue
+        if (!hasCarrierFrequencyHz(index)) continue
+        frequencies += getCarrierFrequencyHz(index)
+    }
+    return frequencies
+}
+
+private fun Location.toDomainSample(
+    receivedElapsedMillis: Long,
+    band: LocationSample.Band,
+): LocationSample? {
     if (!hasAccuracy()) return null
 
     val mappedAccuracy = accuracy.toDouble()
@@ -116,5 +187,19 @@ private fun Location.toDomainSample(receivedElapsedMillis: Long): LocationSample
         speedMetersPerSecond = mappedSpeed,
         fixElapsedMillis = fixElapsedMillis,
         receivedElapsedMillis = receivedElapsedMillis,
+        band = band,
+        speedAccuracyMetersPerSecond = readSpeedAccuracy(),
+        isMock = readIsMock(),
     )
 }
+
+/** Available from API 26; an implausible value is reported as unknown rather than trusted. */
+private fun Location.readSpeedAccuracy(): Double? {
+    if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return null
+    if (!hasSpeedAccuracy()) return null
+    return speedAccuracyMetersPerSecond.toDouble().takeIf { it.isFinite() && it >= 0.0 }
+}
+
+@Suppress("DEPRECATION")
+private fun Location.readIsMock(): Boolean =
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) isMock else isFromMockProvider

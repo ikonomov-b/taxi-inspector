@@ -14,7 +14,7 @@ The design separates Android UI, storage/location adapters, and the small set of
 | UI | Jetpack Compose + Material 3 | A concise, state-driven way to build the custom meter, dialogs, and history. |
 | State | `ViewModel`, `StateFlow`, lifecycle-aware collection | UI survives rotation and reacts to the single source of truth. |
 | Background work | `RideTrackingService`, a `location` foreground service | An active, user-visible ride continues with the screen locked or app backgrounded. |
-| GPS | `LocationManager` GPS provider | Fare distance is GPS-only; no Google Play Services dependency is required. |
+| GPS | `LocationManager` GPS provider plus `GnssStatus` | Fare distance is GPS-only; no Google Play Services dependency is required. Satellite status is read only to tell a single-band fix from a dual-band one. |
 | Settings, active ride, and history | Room | One private, local source of truth with transactional start, completion, recovery, and history trimming. |
 | Object construction | Small `AppContainer` | Explicit construction is clearer than a DI framework at this size. |
 | Tests | JUnit, kotlinx-coroutines-test, Room tests, Compose UI tests | Covers fare correctness first, then Android integration. |
@@ -61,7 +61,7 @@ Prefer fakes over mocking: `FakeLocationClient`, `FakeClock`, and fake repositor
 
 ### Deliberate exclusions
 
-- **No Google Play Services location / Fused Location Provider:** the product explicitly meters GPS-only fixes, and `LocationManager` meets that need without a Play Services dependency.
+- **No Google Play Services location / Fused Location Provider:** the product explicitly meters GPS-only fixes, and `LocationManager` meets that need without a Play Services dependency. This is a deliberate departure from mainstream Android guidance, which recommends the fused provider: its sensor dead reckoning would keep producing positions through tunnels and underground parking, and billing inferred movement would contradict the rule that the app never charges across an unobserved gap.
 - **No WorkManager:** WorkManager is not suitable for a live, second-by-second, user-visible ride; the location foreground service is the correct owner.
 - **No networking, analytics, crash-reporting, maps, or account SDKs:** they do not serve the offline inspector use case and would expand privacy obligations.
 - **No floating-point money library:** `BigDecimal` is in the platform and directly expresses the planned exact-decimal tariff-unit rules.
@@ -105,7 +105,8 @@ app/
     │   │   │   │   └── RideMappers.kt
     │   │   │   └── location/
     │   │   │       ├── LocationClient.kt
-    │   │   │       └── AndroidGpsLocationClient.kt
+    │   │   │       ├── AndroidGpsLocationClient.kt
+    │   │   │       └── GnssBandClassifier.kt
     │   │   ├── tracking/
     │   │   │   ├── RideTrackingService.kt
     │   │   │   ├── RideTrackingController.kt
@@ -162,7 +163,7 @@ RideSummary(id, tariff, total, distanceMeters, idleMillis, elapsedMillis,
 - Amounts are `BigDecimal`-backed `DecimalAmount` values. Rates and the final calculation are never `Double` or `Float`; no model carries a currency identifier because the app intentionally supports any user-entered tariff unit.
 - Durations are stored as integer milliseconds; timestamps use UTC epoch milliseconds for history display.
 - GPS interval calculations use elapsed-realtime values, not wall-clock time, so a device clock change cannot create a false wait charge. A sample whose elapsed timestamp is not greater than the previous accepted timestamp is rejected.
-- A `LocationSample` contains only the input needed for a calculation: coordinates, accuracy, provider, speed when available, received elapsed time, and fix elapsed time. It is never written to ride history. A billable sample is GPS-only, fresh, monotonic, and accurate to 20 m or better; weaker 20–60 m samples are status-only.
+- A `LocationSample` contains only the input needed for a calculation: coordinates, accuracy, provider, speed and speed accuracy when available, the GNSS band that produced the fix, whether the fix was mocked, received elapsed time, and fix elapsed time. It is never written to ride history. A billable sample is GPS-only, unmocked, fresh, monotonic, and accurate to 20 m or better; weaker 20–60 m samples are status-only. The band is `Dual`, `Single`, or `Unknown`, and `Unknown` is treated exactly as `Single`, so a device that cannot report carrier frequency simply keeps the stricter movement floor.
 - `ActiveRide` is the sole persisted active-session row. It contains one temporary last billable GPS point only; it is deleted or converted to a summary when the ride ends. Its phase is one of `Running`, `Paused`, or `PendingInterrupted`; a separate tracking status represents `Searching`, `Good`, `Weak`, `GpsLost`, or `PermissionNeeded`. Terminal outcomes exist only in summaries.
 
 Room stores one `AppSettingsEntity` (including the current tariff), one `ActiveRideEntity`, and `RideSummaryEntity` rows. `RoomRideRepository` is the sole data access point. Starting a ride atomically reads and copies the tariff into the active row. `RideDao.finishRide()` runs in a database transaction: insert the summary, delete the active row, and remove rows older than the ten newest. This makes the ten-ride limit correct even if the process stops during a save. The current tariff is copied into every active/saved ride, so historic totals remain reproducible in their original tariff units.

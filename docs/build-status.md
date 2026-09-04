@@ -14,7 +14,7 @@ This is the single authoritative progress record for implementation work. Update
 
 **Overall state: In progress — phases 0–6 complete; phase 7 is the next implementation gate.**
 
-The project has a reproducible Gradle/Compose baseline, an exact Android-free fare core, an integration-tested Room layer, a GPS-only adapter, a foreground-service tracking vertical slice, and a working Meter UI wired to that service. A user can now save a tariff, grant permissions, run a visible ride, pause/resume, stop and save, or discard after confirmation. History and ride detail remain unbuilt, so saved rides cannot yet be reviewed in the app.
+The project has a reproducible Gradle/Compose baseline, an exact Android-free fare core, an integration-tested Room layer, a GPS-only adapter that also reads satellite status so a dual-band fix can be told from a single-band one, a foreground-service tracking vertical slice, and a working Meter UI wired to that service. A user can now save a tariff, grant permissions, run a visible ride, pause/resume, stop and save, or discard after confirmation. History and ride detail remain unbuilt, so saved rides cannot yet be reviewed in the app.
 
 Last verified: **2026-09-04**
 
@@ -26,7 +26,7 @@ JAVA_HOME=/opt/android-studio-for-platform/jbr \
 BUILD SUCCESSFUL
 ```
 
-The debug JVM report contains 13 tests and the API 35 instrumentation report contains 58 Room/location/service/UI tests, with 0 failures, 0 errors, and 0 skipped tests.
+The debug JVM report contains 21 tests and the API 35 instrumentation report contains 62 Room/location/service/UI tests, with 0 failures, 0 errors, and 0 skipped tests. Lint reported 0 errors.
 
 ## Phase tracker
 
@@ -34,9 +34,9 @@ The debug JVM report contains 13 tests and the API 35 instrumentation report con
 | --- | --- | --- | --- |
 | 0. Freeze product contract | Complete | Product, architecture, and step-by-step plan documents define tariff units, state behaviour, GPS policy, recovery, and scope. | Decisions are documented in `taxi-inspector-design.md`, `code-structure.md`, and `implementation-plan.md`. |
 | 1. Reproducible Android baseline | Complete | Gradle 8.7 wrapper, version catalog, Compose application shell, Java 17 target, Room/KSP configuration, API 35 SDK configuration, and environment record. | `./gradlew --no-daemon test` passes with Android Studio Panda JBR. |
-| 2. Pure fare core | Complete | `DecimalAmount`, tariff parsing/formatting, `FareCalculator`, immutable ride models, and Android-free `RideEngine`. Distance and waiting time were made mutually exclusive after Phase 6 (see the amendment below). | 13 JVM tests cover parsing, display rounding, known fare, idle entry, GPS loss, weak fixes, and distance/waiting exclusivity. More boundary cases remain a future test-expansion task, not a blocker to this phase. |
+| 2. Pure fare core | Complete | `DecimalAmount`, tariff parsing/formatting, `FareCalculator`, immutable ride models, and Android-free `RideEngine`. Distance and waiting time were made mutually exclusive after Phase 6, and mock rejection, a band-dependent movement floor, and speed-confidence gating were added with the Phase 4 amendment (see both amendments below). | 21 JVM tests cover parsing, display rounding, known fare, idle entry, GPS loss, weak fixes, distance/waiting exclusivity, mock rejection, the dual-band movement floor, and a reported speed too coarse to trust. More boundary cases remain a future test-expansion task, not a blocker to this phase. |
 | 3. Durable local state | Complete | Room v1 database, tariff/settings row, active-ride snapshot, summary history, atomic start/finish/interrupted-save transactions, ten-record trimming, repository, mappers, exported schema, and migration-test fixture. | 7 API 35 instrumentation tests verify tariff locking, finish rollback, concurrent interrupted-save idempotence, recreation mapping, deletion, trimming, and the exported v1 schema. UI/service wiring belongs to their later phases. |
-| 4. GPS-only location adapter | Complete | Android-free `LocationClient`, GPS-only `AndroidGpsLocationClient`, elapsed-realtime/sample mapping, provider availability checks, explicit 1 Hz subscription, and cancellation cleanup. | 5 API 35 fake-backed tests verify provider availability, subscription cadence, exact listener removal, GPS/non-GPS mapping, optional speed, and malformed-fix rejection. |
+| 4. GPS-only location adapter | Complete | Android-free `LocationClient`, GPS-only `AndroidGpsLocationClient`, elapsed-realtime/sample mapping, provider availability checks, explicit 1 Hz subscription, and cancellation cleanup. A parallel `GnssStatus` subscription, the `GnssBandClassifier` carrier-frequency rule, and speed-accuracy/mock mapping were added afterwards (see the amendment below). | 9 API 35 fake-backed tests verify provider availability, subscription cadence, removal of both subscriptions, GPS/non-GPS mapping, optional speed, malformed-fix rejection, and band attachment including its stale and absent cases. 5 JVM tests cover the carrier-frequency rule itself. |
 | 5. Foreground tracking service | Complete | Non-sticky location FGS, serialized controller, explicit commands, prerequisite rechecks, bounded fare notifications, notification Pause/Stop, ownership binder, persisted pause/stop/discard, and interrupted recovery coordination. | 14 new API 35 tests cover prerequisite/foreground failures, command serialization, permission loss, paused Resume/Stop, Discard, throttling, ownership/recovery, real service binding, screen recreation/off, and actual notification actions. |
 | 6. Essential Meter UI | Complete | Vintage theme and `TaximeterFace`, `MeterScreen`/`MeterRoute`/`MeterViewModel` with immutable state, actions and one-off effects, a separate Tariff destination with exact-decimal validation, permission/GPS gating with Settings recovery, confirmed Discard, and bind-before-recovery wiring. | 32 API 35 tests cover the meter screen, tariff screen, meter state holder, and tariff state holder. Visual refinement of the meter face stays in Phase 9. |
 | 7. History and recovery UI | Not started | Persistence types exist; the meter already presents and can save or discard a recovered interrupted ride. | Implement list/detail destinations, individual deletion confirmation, and end-to-end persistence tests. |
@@ -71,8 +71,10 @@ The debug JVM report contains 13 tests and the API 35 instrumentation report con
 ### Location adapter
 
 - `LocationClient`: Android-free GPS availability and sample-flow boundary for the future tracking service
-- `AndroidGpsLocationClient`: GPS-provider-only 1 Hz subscription with elapsed-realtime domain mapping
-- Location collection cancellation unregisters the exact platform listener and safely tolerates permission revocation
+- `AndroidGpsLocationClient`: GPS-provider-only 1 Hz subscription with elapsed-realtime domain mapping, plus speed accuracy and the mock-provider flag
+- `GnssBandClassifier`: marks a fix dual-band when enough of the signals used in it are L5-class (1176.45 MHz +/- 1 MHz), which covers GPS L5, Galileo E5a, BeiDou B2a, QZSS L5 and NavIC L5
+- A parallel `GnssStatus` subscription carries the latest band observation forward to fixes received within five seconds of it; a stale or absent observation leaves the fix `Unknown`
+- Location collection cancellation unregisters the exact platform listener and the satellite-status callback, and safely tolerates permission revocation
 
 ### Meter and tariff UI
 
@@ -99,6 +101,7 @@ The debug JVM report contains 13 tests and the API 35 instrumentation report con
 4. Automated service tests use emulator/fake GPS inputs; real street, tunnel, and weak-signal field validation remains part of Phase 8.
 5. The database is still version 1, so the migration fixture validates the exported baseline but cannot exercise a forward migration until a future schema version exists.
 6. The local Android SDK path is machine-specific and remains in ignored `local.properties`; it must never be committed.
+7. The 2.5 m dual-band movement floor is reasoned, not measured. No emulator produces L5 satellite status, so every automated test reaches it through injected band values and `simulate-drive.sh` never exercises it at all. Confirm it on a dual-band handset in Phase 8 with a stationary hold, where distance must stay flat, and with a curved route, where the tighter floor should reduce the chord under-read. Fall back to 3 m if the hold drifts.
 
 ## Next phase gate
 
@@ -222,6 +225,34 @@ Verification:
 Remaining risk or next gate:
 - Behaviour while Moving is unchanged: the baseline advances on exactly the segments it did before, so the documented noise rule still holds.
 - Real-device confirmation of the thresholds and of the no-reported-speed case remains a Phase 8 gate.
+
+### Phase 4 amendment — dual-band GNSS, mock rejection, and speed confidence
+
+Status: Complete
+Date: 2026-09-04
+Delivered:
+- Added a `GnssStatus` subscription beside the existing GPS subscription, and `GnssBandClassifier`, which marks a fix dual-band when at least four of the signals used in it sit within 1 MHz of 1176.45 MHz.
+- Carried the band, the reported speed accuracy, and the mock-provider flag through `LocationSample` as defaulted fields, so no existing call site changed and no Room migration was needed.
+- `RideEngine` now lowers the movement floor from 5 m to 2.5 m when both endpoints of a segment are dual-band, refuses any mocked fix outright, and treats a reported speed whose accuracy is wider than the 0.8-1.3 m/s hysteresis band as no reported speed, falling through to its existing derived-speed path.
+- Updated the design document's fare rules, timing contract, location handling, architecture summary, and acceptance criteria, and corrected its two stale claims that the app subscribes to the network provider.
+
+Why it mattered:
+- The engine's noise deadband is `max(floor, accuracy of each endpoint)`, so it already tightened itself on better hardware -- except that the 5 m constant floor bound it. On a dual-band handset reporting 2 m accuracy the app could resolve movement it was discarding.
+- That floor sets a resolvable-speed threshold: at 1 Hz, 5 m per sample is 18 km/h. Below it the baseline is retained and distance lands in chord-jumps that cut corners, which under-reads real road distance in exactly the stop-and-go traffic a taxi meter spends its time in. Under-reading makes an honest meter look inflated, which is the wrong direction of error for an inspection tool.
+- An app cannot request L5; the receiver decides. The only thing available is observation, so the band is inferred from the carrier frequencies reported as used in the fix.
+- Nothing previously stopped a mock provider from manufacturing distance.
+
+Verification:
+- Command: `GRADLE_USER_HOME=/tmp/taxi-inspector-gradle JAVA_HOME=/opt/android-studio-for-platform/jbr ./gradlew --no-daemon test connectedDebugAndroidTest lint`
+- Result: `BUILD SUCCESSFUL`; 21 debug JVM tests and 62 API 35 instrumentation tests passed, lint reported 0 errors.
+- `scripts/simulate-drive.sh` passed unchanged: distance 791.71 m against a predicted 819.44 m (40 m tolerance), idle 58017 ms against 56823 ms (3000 ms tolerance), fare exact.
+- That run also settled an open question: the emulator's `geo fix` positions are not flagged as mock, so mock rejection does not break the simulated-drive harness. Had they been, the ride would have billed zero distance.
+
+Remaining risk or next gate:
+- The simulated drive exercises none of the dual-band path. `geo fix` supplies no satellite status, so every fix is `Unknown` and takes the same 5 m floor as before; the run proves the change is inert on single-band input, not that the 2.5 m floor is right.
+- A baseline recovered from an interrupted ride returns as `Unknown` because the band is deliberately not persisted, so one segment after recovery uses the 5 m floor. This avoids a schema version for a negligible effect.
+- Band is not yet visible in the UI, and a mocked fix currently reports `Weak` rather than a status of its own. Both need the band threaded through the persisted `ActiveRide` and a new `TrackingStatus` value.
+- Real-device confirmation of the 2.5 m floor is a Phase 8 gate (see risk 7).
 
 ## Update template
 
