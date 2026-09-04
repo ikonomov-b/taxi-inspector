@@ -3,10 +3,13 @@
     <color name="paper">#F5EBD2</color>
     <color name="cab_yellow">#E7B52E</color>
 
-    <color name="cap_charcoal">#2E2A25</color>
-    <color name="cap_peak">#1C1815</color>
-    <color name="cap_peak_edge">#100D0B</color>
-    <color name="cap_seam">#5A4E42</color>
-    <color name="cap_button">#D4A017</color>
-    <color name="cap_button_edge">#8A6A12</color>
+    <color name="cap_icon_bg">#1C1712</color>
+    <color name="cap_crown_edge">#9C6E12</color>
+    <color name="cap_seam">#B98A1E</color>
+    <color name="cap_band_edge">#2A1D14</color>
+    <color name="cap_check_dark">#1C1815</color>
+    <color name="cap_peak">#2E2318</color>
+    <color name="cap_peak_edge">#7A5A1A</color>
+    <color name="cap_button">#2A1D14</color>
+    <color name="cap_button_edge">#4A3A2A</color>
 </resources>
