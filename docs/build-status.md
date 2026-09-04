@@ -26,7 +26,7 @@ JAVA_HOME=/opt/android-studio-for-platform/jbr \
 BUILD SUCCESSFUL
 ```
 
-The debug JVM report contains 8 tests and the API 35 instrumentation report contains 58 Room/location/service/UI tests, with 0 failures, 0 errors, and 0 skipped tests.
+The debug JVM report contains 13 tests and the API 35 instrumentation report contains 58 Room/location/service/UI tests, with 0 failures, 0 errors, and 0 skipped tests.
 
 ## Phase tracker
 
@@ -34,7 +34,7 @@ The debug JVM report contains 8 tests and the API 35 instrumentation report cont
 | --- | --- | --- | --- |
 | 0. Freeze product contract | Complete | Product, architecture, and step-by-step plan documents define tariff units, state behaviour, GPS policy, recovery, and scope. | Decisions are documented in `taxi-inspector-design.md`, `code-structure.md`, and `implementation-plan.md`. |
 | 1. Reproducible Android baseline | Complete | Gradle 8.7 wrapper, version catalog, Compose application shell, Java 17 target, Room/KSP configuration, API 35 SDK configuration, and environment record. | `./gradlew --no-daemon test` passes with Android Studio Panda JBR. |
-| 2. Pure fare core | Complete | `DecimalAmount`, tariff parsing/formatting, `FareCalculator`, immutable ride models, and Android-free `RideEngine`. | 8 JVM tests cover parsing, display rounding, known fare, idle entry, GPS loss, and weak fixes. More boundary cases remain a future test-expansion task, not a blocker to this phase. |
+| 2. Pure fare core | Complete | `DecimalAmount`, tariff parsing/formatting, `FareCalculator`, immutable ride models, and Android-free `RideEngine`. Distance and waiting time were made mutually exclusive after Phase 6 (see the amendment below). | 13 JVM tests cover parsing, display rounding, known fare, idle entry, GPS loss, weak fixes, and distance/waiting exclusivity. More boundary cases remain a future test-expansion task, not a blocker to this phase. |
 | 3. Durable local state | Complete | Room v1 database, tariff/settings row, active-ride snapshot, summary history, atomic start/finish/interrupted-save transactions, ten-record trimming, repository, mappers, exported schema, and migration-test fixture. | 7 API 35 instrumentation tests verify tariff locking, finish rollback, concurrent interrupted-save idempotence, recreation mapping, deletion, trimming, and the exported v1 schema. UI/service wiring belongs to their later phases. |
 | 4. GPS-only location adapter | Complete | Android-free `LocationClient`, GPS-only `AndroidGpsLocationClient`, elapsed-realtime/sample mapping, provider availability checks, explicit 1 Hz subscription, and cancellation cleanup. | 5 API 35 fake-backed tests verify provider availability, subscription cadence, exact listener removal, GPS/non-GPS mapping, optional speed, and malformed-fix rejection. |
 | 5. Foreground tracking service | Complete | Non-sticky location FGS, serialized controller, explicit commands, prerequisite rechecks, bounded fare notifications, notification Pause/Stop, ownership binder, persisted pause/stop/discard, and interrupted recovery coordination. | 14 new API 35 tests cover prerequisite/foreground failures, command serialization, permission loss, paused Resume/Stop, Discard, throttling, ownership/recovery, real service binding, screen recreation/off, and actual notification actions. |
@@ -94,10 +94,11 @@ The debug JVM report contains 8 tests and the API 35 instrumentation report cont
 ## Known limitations and active risks
 
 1. The exact fare core has targeted unit tests but does not yet cover every documented threshold, rejected segment, and interrupted-session transition.
-2. The meter face is functional and accessible but visually plain; the late-1970s styling, texture, and transitions remain Phase 9 work.
-3. Automated service tests use emulator/fake GPS inputs; real street, tunnel, and weak-signal field validation remains part of Phase 8.
-4. The database is still version 1, so the migration fixture validates the exported baseline but cannot exercise a forward migration until a future schema version exists.
-5. The local Android SDK path is machine-specific and remains in ignored `local.properties`; it must never be committed.
+2. On a device whose GPS fixes carry no reported speed, waiting time under-reads: derived speed is unavailable for part of a slow crawl, and a stationary vehicle's jitter keeps the engine out of Idle entirely. This follows the design rule that speed which cannot be obtained safely accrues no waiting time, and it errs towards under-reading rather than over-charging. Confirm it against a real device in Phase 8 before deciding whether the derivation needs its own last-accepted-fix reference.
+3. The meter face is functional and accessible but visually plain; the late-1970s styling, texture, and transitions remain Phase 9 work.
+4. Automated service tests use emulator/fake GPS inputs; real street, tunnel, and weak-signal field validation remains part of Phase 8.
+5. The database is still version 1, so the migration fixture validates the exported baseline but cannot exercise a forward migration until a future schema version exists.
+6. The local Android SDK path is machine-specific and remains in ignored `local.properties`; it must never be committed.
 
 ## Next phase gate
 
@@ -198,6 +199,29 @@ Remaining risk or next gate:
 - The meter face is functional and accessible but visually plain; the late-1970s styling, texture, and transitions are Phase 9 work.
 - Saved rides cannot yet be reviewed or deleted in the app; that is the Phase 7 gate.
 - Real-device street, tunnel, weak-signal, and reboot validation of the whole flow remains a Phase 8 gate.
+
+### Phase 2 amendment — distance and waiting time are mutually exclusive
+
+Status: Complete
+Date: 2026-09-04
+Delivered:
+- `RideEngine.onLocation` billed distance without consulting `motionState`, while `onTick` billed waiting from `motionState` alone, so both could advance over the same second. Distance now accrues only while Moving.
+- Kept the billable baseline advancing on any significant segment, billed or not, so leaving Idle measures from a current point instead of back-billing movement already charged as waiting.
+- Updated the design document's fare rules and acceptance criteria, and the durable fare decisions in project memory.
+
+Why it mattered:
+- One regime was documented and bounded: the three-second Idle exit confirmation bills waiting while the vehicle accelerates away.
+- Two were unbounded. A crawl at or below 0.8 m/s stays Idle yet still crosses the five-metre significance threshold every few seconds; and a vehicle held between the 0.8 and 1.3 m/s thresholds never leaves Idle at all. Simulated at 1 Hz, sixty seconds in either regime billed roughly 40–55 m of distance alongside 55 s of waiting.
+- The existing engine tests could not catch it: every fix in `RideEngineTest` reused one coordinate, so distance was always zero.
+
+Verification:
+- Command: `GRADLE_USER_HOME=/tmp/taxi-inspector-gradle JAVA_HOME=/opt/android-studio-for-platform/jbr ./gradlew --no-daemon test connectedDebugAndroidTest lint`
+- Result: `BUILD SUCCESSFUL`; 13 debug JVM tests and 58 API 35 instrumentation tests passed, lint reported 0 errors.
+- Five new engine tests drive a moving 1 Hz profile and cover the crawl, the hysteresis band, ordinary movement, the exit interval, and the absence of back-billing after leaving Idle.
+
+Remaining risk or next gate:
+- Behaviour while Moving is unchanged: the baseline advances on exactly the segments it did before, so the documented noise rule still holds.
+- Real-device confirmation of the thresholds and of the no-reported-speed case remains a Phase 8 gate.
 
 ## Update template
 

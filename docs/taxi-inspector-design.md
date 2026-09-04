@@ -84,7 +84,7 @@ total = initialTax
 ```
 
 - `initialTax` is added once after the rider starts a ride.
-- `trackedDistanceMeters` is the sum of valid consecutive GPS fixes.
+- `trackedDistanceMeters` is the sum of valid consecutive GPS fixes **received while the engine is Moving**. The two variable components are mutually exclusive: like a real taximeter, the app charges for distance or for waiting, never for both over the same second. Without this rule a vehicle crawling in traffic bills twice, and a vehicle held between the 0.8 and 1.3 m/s thresholds bills twice indefinitely.
 - The fare engine has an explicit **Moving** or **Idle** state. `idleSeconds` starts accumulating only after speed is at or below **0.8 m/s** for five consecutive seconds. An active Idle state ends only after speed is at or above **1.3 m/s** for three consecutive seconds. Between those thresholds it retains its current state. This hysteresis prevents GPS speed jitter from repeatedly switching the waiting charge.
 - If the provider supplies no speed, the app may derive it only from two accepted GPS fixes no more than five seconds apart. If speed cannot be obtained safely, waiting time does not accrue.
 - The UI normally rounds the total to two decimal places for display; the calculation retains precision until display. This display convention does not restrict configured costs to two decimal places.
@@ -97,7 +97,8 @@ Fare rules use elapsed-realtime timestamps, never wall-clock time. A one-second 
 - A billable location sample is GPS-provider data with precise permission, a monotonic elapsed-realtime timestamp, an age of at most five seconds, and billing-quality accuracy. The first-build billing-quality threshold is **20 m or better**. A 20–60 m GPS fix may update the visible status to **Weak**, but cannot change distance or waiting charges.
 - A billable segment is formed only by consecutive billable samples. It is rejected if its timestamps are not increasing, its gap exceeds 15 seconds, or it is implausible. Movement smaller than the larger of **5 m** and either endpoint's reported accuracy is treated as GPS noise; the last billable baseline remains until a significant segment is received.
 - A reported speed is usable only while its source sample remains fresh. Derived speed is usable only between two billable samples no more than five seconds apart. An absent or stale speed cannot add wait time.
-- Five completed consecutive seconds at or below 0.8 m/s move the engine into Idle; the qualifying five seconds are not charged retroactively. Billing begins with the next eligible elapsed interval. While Idle, three completed consecutive seconds at or above 1.3 m/s end Idle; waiting time remains billable during that exit-confirmation interval. Speeds between the thresholds retain the existing state.
+- Five completed consecutive seconds at or below 0.8 m/s move the engine into Idle; the qualifying five seconds are not charged retroactively, and distance covered during them is ordinary billable distance. Billing begins with the next eligible elapsed interval. While Idle, three completed consecutive seconds at or above 1.3 m/s end Idle; waiting time remains billable during that exit-confirmation interval. Speeds between the thresholds retain the existing state.
+- No distance is billed while the engine is Idle, including throughout the exit-confirmation interval. The billable baseline still advances across an Idle period, so leaving Idle measures from a current point and never back-bills movement that was already charged as waiting.
 - Fifteen seconds after the last billable sample, the engine enters GPS Lost, freezes both fare components, clears movement/idle candidates, and treats the next billable sample as a new distance baseline. It never charges across the unobserved gap.
 
 ## Location handling
@@ -173,6 +174,7 @@ If precise permission is revoked during a ride, the service immediately freezes 
 - A missing or weak GPS signal is communicated clearly and never silently treated as good tracking.
 - GPS-loss test: after 15 seconds without a valid fix, no further distance or wait charge is added; a returning fix creates a new baseline.
 - Idle-hysteresis test: waiting charges begin only after five seconds at or below 0.8 m/s and stop after three seconds at or above 1.3 m/s.
+- Exclusivity test: a crawl below 0.8 m/s, and a vehicle held inside the 0.8–1.3 m/s band, bill waiting time and no distance; a moving vehicle bills distance and no waiting time; leaving Idle bills neither the exit interval's distance nor, afterwards, the distance covered while Idle.
 - Permission test: the meter cannot start until required permissions and enabled location services are confirmed; denied permissions give a clear recovery action.
 - Background test: lock the screen and background the app for a live ride, then confirm one-second updates and notification Pause/Stop controls. Restart/kill recovery must present an interrupted partial ride without adding unobserved cost.
 - State/recovery test: verify every Ready, Running, Paused, GPS Lost, Pending Interrupted, Completed, and Discarded transition; bind to a live service before recovery and verify repeated recovery cannot duplicate a history record.

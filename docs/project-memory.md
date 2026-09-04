@@ -14,11 +14,12 @@
 
 ## Durable fare and GPS decisions
 
-- The fare formula is initial tax plus confirmed kilometres times rate plus confirmed idle minutes times rate.
+- The fare formula is initial tax plus confirmed kilometres times rate plus confirmed idle minutes times rate. Distance and waiting are mutually exclusive: distance accrues only while the engine is Moving, so no second is ever charged as both. The billable baseline still advances while Idle so that leaving Idle never back-bills.
 - Time calculations use elapsed-realtime semantics. Wall-clock changes must not alter billing.
 - A billable GPS sample is GPS-provider, fresh, monotonic, and accurate to 20 m or better. A 20–60 m sample is Weak/status-only. Worse, stale, non-GPS, or out-of-order input never bills.
 - A meaningful segment must exceed the larger of 5 m and either endpoint accuracy. Segments over 1,500 m or separated by more than 15 seconds do not bill.
-- Idle entry requires five completed seconds at or below 0.8 m/s and is not retroactively charged. Idle exit requires three completed seconds at or above 1.3 m/s; its confirmation interval remains billable.
+- Idle entry requires five completed seconds at or below 0.8 m/s and is not retroactively charged. Idle exit requires three completed seconds at or above 1.3 m/s; its confirmation interval remains billable as waiting, and no distance is billed across it.
+- Speed derived from GPS displacement uses the held billable baseline, so a stationary vehicle's jitter yields a decaying rather than a constant apparent speed. When no usable speed exists the engine bills no waiting time at all, per the design rule that unobtainable speed accrues nothing. On a device whose fixes carry no reported speed this under-reads waiting time; under-reading is the intended conservative direction.
 - After 15 seconds without a fresh billable fix, GPS Lost freezes distance and waiting charges; a returning good fix starts a new baseline.
 
 ## Architecture decisions

@@ -122,8 +122,11 @@ object RideEngine {
         val significantMeters = previousBaseline?.let {
             maxOf(MINIMUM_SIGNIFICANT_MOVEMENT_METERS, it.accuracyMeters, sample.accuracyMeters)
         }
-        val distanceToAdd = if (canUseSegment && segmentMeters!! >= significantMeters!!) {
-            BigDecimal.valueOf(segmentMeters)
+        val isSignificantSegment = canUseSegment && segmentMeters!! >= significantMeters!!
+        // Distance and waiting time are mutually exclusive: a vehicle the engine considers
+        // Idle is billed for time, so its movement advances the baseline without billing.
+        val distanceToAdd = if (isSignificantSegment && ride.motionState == MotionState.Moving) {
+            BigDecimal.valueOf(segmentMeters!!)
         } else {
             BigDecimal.ZERO
         }
@@ -140,7 +143,9 @@ object RideEngine {
             previousBaseline == null -> sample
             gapMillis == null || gapMillis > GPS_LOSS_MILLIS -> sample
             segmentMeters != null && segmentMeters > MAXIMUM_SEGMENT_METERS -> sample
-            distanceToAdd.signum() > 0 -> sample
+            // Advances on any significant segment, billed or not, so that leaving Idle
+            // never measures back across an interval that was already billed as waiting.
+            isSignificantSegment -> sample
             else -> previousBaseline
         }
 
