@@ -120,6 +120,39 @@ To reduce false charges caused by GPS drift, the first release should:
 
 The app must state that underground parking, dense buildings, tunnels, and low-quality GPS can make the estimate unreliable.
 
+### Proposed accuracy improvement — bounded GPS-gap reconstruction
+
+This proposal is **not implemented and does not replace the current first-build contract** above. Today, a gap of up to 15 seconds may produce one straight-line segment between billable endpoints; once the engine enters GPS Lost, the returning fix starts a new baseline and the lost interval adds no fare. Phase 8 must compare that conservative result with a real taximeter before a reconstruction policy becomes billable product behaviour.
+
+The objective of reconstruction would be to reduce the systematic under-reading caused by tunnels, underpasses, and urban-canyon outages while keeping every inferred contribution explicit and bounded. Linear interpolation cannot recreate the road taken: intermediate points on a straight line sum to the same endpoint chord. It can only distribute that chord over the gap so the fare engine can make one deterministic distance-versus-time decision.
+
+Before selecting that decision rule, field validation must identify the calculation mode of the target taximeter. The EU measuring-instruments definition distinguishes normal mode S, which applies the time tariff below a tariff-derived cross-over speed and the distance tariff above it, from mode D, which applies both throughout the trip. Taxi Inspector currently implements a separate fixed-speed Moving/Idle model, so changing gap handling alone may not remove the largest slow-traffic discrepancy. [EU taximeter definitions (MI-007)](https://eur-lex.europa.eu/legal-content/EN/TXT/?uri=CELEX%3A02014L0032-20150127)
+
+If field evidence supports reconstruction, the product change should follow these constraints:
+
+- Define a successful endpoint as a fresh, monotonic, unmocked, billing-quality GPS fix. A missing one-second callback alone is not failure; detect the gap from elapsed-realtime fix timestamps.
+- Retain only the minimum active-session state required for the latest accepted endpoint, the distance-noise baseline, and the time through which fare has already been attributed. Never retain an interpolated route or a stream of timestamps.
+- On reacquisition, compute the elapsed gap, the great-circle endpoint chord, and its implied average speed. Do not manufacture one-second `LocationSample` values: they add no observation and would make noise filtering and hysteresis depend on invented events. For brief gaps, separately evaluate whether integrating two trusted endpoint speeds improves curved-road distance; do not use that extrapolation unless replay and field data bound its error in acceleration and stop-and-go cases.
+- Reject position-derived reconstruction if either endpoint is weak or mocked, timestamps are non-monotonic or cross a reboot/session boundary, the ride was paused or interrupted, displacement does not clear an uncertainty-aware floor, implied motion is implausible, or the gap exceeds a field-validated distance-recovery maximum.
+- Attribute each elapsed interval exactly once. Any waiting time already billed from a still-fresh pre-gap speed must be excluded from the recovered interval; reconstructed distance and waiting must not overlap unless a separately approved target explicitly uses taximeter mode D.
+- If the target uses mode S, reconstruct the interval as `max(distanceRate × recoveredDistance, timeRate × gapDuration)`. This is the cross-over rule expressed directly in fare units and avoids inventing a sequence of motion states. While service ownership is continuous, the time candidate may accrue provisionally during GPS loss because a mode-S taximeter charges at least its time rate; on reacquisition, replace it with the distance candidate only when the latter is larger. This requires renaming the current `idleMillis` concept to tariff-time duration if the same rule is adopted for ordinary tracking.
+- If the target uses mode D, reconstruction is `distanceRate × recoveredDistance + timeRate × gapDuration`. Mode D conflicts with the current mutual-exclusivity contract and therefore requires explicit product approval and a whole-trip fare-model change, not a gap-only exception.
+- If the target really charges time only while stationary under the current fixed 0.8/1.3 m/s rules, two endpoints cannot reliably recover a mixed stop-and-go interval. In that case, average-speed classification remains only a hypothesis and must beat the freeze policy in reference-drive replay before adoption.
+- Apply the maximum gap to position-derived distance, not automatically to elapsed time. A verified mode-S or mode-D time component may continue through a long outage only while the same foreground service continuously owns a Running ride; it must stop on Pause, permission loss, explicit GPS disablement, service interruption, process death, or reboot.
+- Keep measured and reconstructed distance/time as separate aggregates even if both feed the displayed estimate. The meter and saved detail must disclose that GPS-gap estimation contributed to the total and show its duration.
+- If provisional time fare is enabled, replace `GPS lost — fare frozen` with an unambiguous state such as `GPS lost — time estimate active`; the notification and accessibility description must make the same distinction. Never display a frozen status while the total is changing.
+- Preserve the present no-reconstruction behaviour when a candidate fails any guard. Never reconstruct across permission loss, explicit GPS disablement, Pause, service/process interruption, force-stop, or reboot.
+
+The following decisions intentionally remain open until Phase 8 evidence exists:
+
+1. Which taximeter calculation mode and cross-over behaviour the app is intended to approximate.
+2. The maximum recoverable gap and the uncertainty/plausibility bounds.
+3. How positional uncertainty adjusts the recovered chord, and whether short-gap endpoint-speed integration improves rather than worsens expected fare error.
+4. Whether reconstructed aggregates belong in the active snapshot and ride summary, which would require a Room migration and updated history disclosure.
+5. Whether the user-facing waiting/still tariff and `idleMillis` names must become a general time tariff and tariff-time duration for the selected reference mode.
+
+Any implementation must first correct and test the existing boundary semantics: Weak must freeze fare immediately, gap detection must use the latest accepted fix rather than an older noise baseline, and exactly 15 seconds must have one deterministic result regardless of ticker/location event order.
+
 ### Background tracking
 
 An active ride may continue while the app is in the background or the screen is locked. To make this visible and reliable, starting a ride launches a foreground location service with a persistent notification showing the current total and **Pause** and **Stop** actions. Before tracking begins, the app confirms that GPS location services are enabled and that every required runtime permission has been granted; otherwise it explains what is missing and does not start the meter.

@@ -188,6 +188,28 @@ It also has `start(tariff, now)` and `finish(activeRide, now)` functions. Inputs
 
 `RideTrackingService` owns `RideTrackingController`, the one mutable in-memory active session. The controller serializes GPS callbacks, ticker ticks, and commands through one channel/coroutine, passes inputs to `RideEngine`, persists changed state, and exposes non-coordinate ownership/status through the service binder. No ViewModel, DAO callback, or composable is allowed to mutate an active ride.
 
+### Candidate GPS-gap reconstruction boundary
+
+Bounded reconstruction is a Phase 8 accuracy proposal, not current behaviour. It must remain inside the pure `ride` domain if approved; neither the service nor UI may calculate a recovered fare. Do not implement it by emitting synthetic one-second locations, because evenly interpolated points contain no more route evidence than the endpoint chord and would couple invented samples to the existing deadband and hysteresis.
+
+The proposed domain shape is one explicit, atomic gap-recovery input carrying two validated endpoints and the unattributed elapsed interval. The reducer would either reject it or return separately accumulated measured and reconstructed distance/time. If the verified reference uses mode S or D, ordinary `Tick` processing may also accrue a provisional time-tariff component while the same service continuously owns a Running ride; reacquisition must reconcile rather than add over that provisional amount. `ActiveRide` would need to distinguish:
+
+- the latest accepted endpoint and its elapsed-realtime timestamp, used to detect the actual outage;
+- the held distance-noise baseline, which may intentionally be older than the latest accepted endpoint; and
+- a `fareAttributedThroughElapsedMillis` watermark, preventing the ticker and recovered gap from charging the same interval.
+
+Only this minimum active state may be retained; it is not a route. If reconstructed aggregates are saved for disclosure in ride detail, add explicit aggregate fields rather than samples, bump the Room schema, preserve existing records with a forward migration, and export/test the new schema.
+
+The reducer's acceptance policy must validate endpoint quality, monotonic time within one boot/session, positional uncertainty, a duration-scaled plausibility bound, the field-approved maximum distance-recovery gap, and the absence of Pause, permission loss, explicit GPS disablement, or service interruption. Fare arithmetic remains exact; GPS distance, speed, and uncertainty may remain `Double` inputs.
+
+For a verified mode-S reference, the recovered variable charge is the larger of the exact time candidate and exact distance candidate. The engine attributes the interval to one component only and may replace provisional time with distance on reacquisition. For mode D it is their sum, which requires an explicit change to the product's mutual-exclusivity rule. For the present custom stationary-wait model, endpoint average speed is insufficient to reproduce mixed stop-and-go behavior and remains experimental. Do not implement a gap-specific taximeter mode while leaving ordinary intervals on a contradictory model.
+
+The existing name `idleMillis` is valid only for the current stationary-wait contract. If the chosen reference charges a time tariff below a tariff-derived cross-over speed, rename the domain/persistence/presentation concept to tariff-time duration and apply that model consistently to observed and reconstructed intervals. Fare resolution/increment behavior must also be captured if matching the displayed reference-meter amount, rather than only its continuous underlying fare.
+
+An approved provisional estimator also needs a distinct visible status such as `GpsLostEstimating`; reusing `GpsLost` with its current “fare frozen” presentation while the total advances would be false. That status remains domain-owned and is rendered consistently by the notification and Meter UI.
+
+Before adding reconstruction, fix the current boundary behavior so a Weak status cannot continue billing from an earlier speed, use a consistent half-open rule at the 15-second loss boundary, and add deterministic tests for both possible ticker/location arrival orders.
+
 ## Background tracking flow
 
 ```text
@@ -272,12 +294,12 @@ Avoid generic `BaseViewModel`, repository base classes, event buses, global muta
 | Test level | Target | Key cases |
 | --- | --- | --- |
 | Unit | `DecimalAmount`, `FareCalculator` | decimal-comma normalization, currency-neutral formatting, precision, half-up rounding, and known fare totals. |
-| Unit | `RideEngine` | non-retroactive 1 Hz idle entry, 0.8/1.3 m/s hysteresis, stale-speed expiry, weak/out-of-order fixes, 15-second GPS loss, and pause/resume. |
+| Unit | `RideEngine` | non-retroactive 1 Hz idle entry, 0.8/1.3 m/s hysteresis, stale-speed expiry, immediate Weak freezing, weak/out-of-order fixes, deterministic 15-second GPS loss, and pause/resume. If gap reconstruction is approved: accepted/rejected recovery, exact-once interval attribution, uncertainty/cross-over boundaries, and measured-versus-estimated aggregates. |
 | Unit | ViewModels | permission/status states and actions using a fake repository. |
 | Instrumented | Room DAO/repository | active-to-summary transaction, history trimming to 10, persistence after recreation. |
 | Instrumented | Service/location adapter | foreground command handling, fake location updates, notification actions, discard confirmation path, service-bind-before-recovery, and idempotent interrupted-session recovery. |
 | Compose UI | Meter, tariff screen, history/detail | formatted display, confirmations, accessibility labels, dynamic text. |
-| Manual device | real GPS/background | screen lock, GPS toggle, weak signal, permission revocation, notification denial, process death, force-stop, reboot, and street/slow-traffic/urban-canyon/tunnel field validation. |
+| Manual device | real GPS/background | screen lock, GPS toggle, weak signal, permission revocation, notification denial, process death, force-stop, reboot, and street/slow-traffic/urban-canyon/tunnel field validation. Compare current and candidate gap policies against a reference taximeter by gap-duration bucket before approving reconstruction constants. |
 
 Keep test fakes alongside their consumers. For example, `FakeLocationClient` sits beside tracking tests rather than mocking `LocationManager`. Every documented fare threshold has a named unit test.
 

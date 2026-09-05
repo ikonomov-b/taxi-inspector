@@ -17,7 +17,7 @@ Do not start a later phase until the exit criteria for the current phase are met
 
 - Amounts are exact, non-negative decimal **tariff units**. They may represent any local currency, but the app stores no currency code, symbol, or exchange rate and displays no currency label.
 - The active fare engine is the only place that calculates a total. UI code, Room entities, and location adapters never calculate a fare independently.
-- Ambiguous GPS data freezes billing. The app does not estimate an unobserved gap.
+- Ambiguous GPS data freezes billing. The app does not estimate an unobserved gap unless Phase 8 field evidence leads to an explicit, documented bounded-reconstruction amendment; the current implementation must not be described as having that amendment.
 - The foreground service is the sole owner and writer of a running ride. The UI only observes state and sends explicit commands.
 - An active ride always uses the tariff locked at Start; later tariff changes cannot alter it.
 - No route, raw location history, network request, account, analytics event, or advertising identifier is introduced.
@@ -324,9 +324,22 @@ Perform manual tests on real devices in:
 - GPS disable/enable and permission revocation;
 - notification denial, service kill, force-stop, and reboot.
 
-Compare observed behaviour with the design's promise: weak or missing data freezes fare rather than silently billing. If the 20 m / significant-segment rules require adjustment, change the documented constants and repeat the pure-engine tests.
+Compare observed behaviour with the current design promise: weak or missing data freezes fare rather than silently billing. Record reference-taximeter fare, distance, time, calculation mode if known, signed error, and absolute error. Bucket results by uninterrupted tracking and by 5, 15, 30, 60, and 120-second outages. If the 20 m / significant-segment rules require adjustment, change the documented constants and repeat the pure-engine tests.
 
-### Step 8.3: Complete release privacy work
+### Step 8.3: Resolve taximeter matching and bounded gap reconstruction
+
+- Identify whether the intended reference meter uses single application below/above a cross-over speed, simultaneous distance/time application, or a jurisdiction-specific rule. Do not assume the current 0.8/1.3 m/s stationary hysteresis matches its tariff switch.
+- Capture the reference meter's fare increment/resolution as well as its calculation mode; a continuous two-decimal estimate can otherwise disagree even when its distance and time measurements are close.
+- Replay the captured field traces through the current freeze policy and an offline candidate that uses the last and next billable endpoints, elapsed gap, positional uncertainty, and average speed. Linear interpolation must not be treated as recovered route geometry. For short gaps, evaluate trusted endpoint-speed integration separately rather than assuming it improves the chord.
+- For mode S, evaluate `max(distanceRate × recoveredDistance, timeRate × gapDuration)` and provisional time-rate accrual during a continuously service-owned outage. For mode D, evaluate the sum and treat it as an explicit whole-product contract change. If the target uses stationary-only waiting, do not assume endpoint average speed reconstructs a mixed interval.
+- Choose or reject a maximum position-derived recovery gap, uncertainty adjustment, duration-scaled plausibility bound, and short-gap speed estimator from the measured error distribution. Decide separately whether a verified time-tariff floor may continue through longer outages. Record the decision in the design and project memory.
+- Before any production reconstruction, fix immediate Weak freezing and the exact 15-second event-order boundary. Add JVM tests at 5, 14, 15, 16, 30, 60, and 120 seconds, including straight movement, curved-route under-read, stationary drift, stop-and-go ambiguity, implausible reacquisition, Pause, permission loss, process interruption, and reboot.
+- For mode-S simulations with exact endpoints, prove that the candidate equals the time tariff for a stationary gap, equals the distance tariff for constant motion above cross-over, and is no greater than the reference fare for variable-speed or curved travel whose true path is at least the endpoint chord. Separately inject realistic endpoint error to measure when that lower-bound property is lost and tune or reject the uncertainty adjustment.
+- If reconstruction is approved, add one explicit pure-domain gap input and an exact-once fare-attribution watermark. Keep measured and reconstructed aggregates separate, expose the estimate in Meter/Ride Detail, and migrate Room without storing a route or timestamp stream. Apply the chosen taximeter mode consistently to ordinary and reconstructed intervals; rename `idleMillis` if it becomes general tariff-time duration.
+- If provisional time fare changes the total during GPS loss, add a distinct domain/UI/notification status and accessibility text; the existing “fare frozen” wording must remain reserved for intervals that cannot bill.
+- Repeat the reference-taximeter drives after implementation. Accept the change only if it materially reduces absolute error without an unacceptable positive-charge bias.
+
+### Step 8.4: Complete release privacy work
 
 - Decide explicitly whether the private database participates in Android backup and configure it accordingly.
 - Add a concise in-app estimate-only and privacy disclosure.
@@ -336,6 +349,7 @@ Compare observed behaviour with the design's promise: weak or missing data freez
 ### Exit criteria
 
 - Accessibility checks pass and all documented device scenarios have a recorded result.
+- The target taximeter calculation mode and GPS-gap policy are explicitly recorded. If reconstruction is enabled, its thresholds have field evidence, its inferred contribution is disclosed, and its deterministic/domain/persistence tests pass.
 - The release build accurately describes its estimate-only and data-handling behaviour.
 
 ## Phase 9 — Non-essential work, only after the essential release candidate
