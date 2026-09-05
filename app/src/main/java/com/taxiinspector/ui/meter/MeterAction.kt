@@ -5,6 +5,9 @@ sealed interface MeterAction {
     /** Opens the tariff destination; refused while a ride holds a locked tariff. */
     data object EditTariff : MeterAction
 
+    /** Opens the durable saved-ride history. */
+    data object ViewHistory : MeterAction
+
     /** Pre-ride Reset: clears the display and any pending notice, without confirmation. */
     data object Reset : MeterAction
 

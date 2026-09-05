@@ -38,7 +38,11 @@ private const val MESSAGE_VISIBLE_MILLIS = 4_000L
  * before recovery. The ViewModel stays free of every one of those Android types.
  */
 @Composable
-fun MeterRoute(onEditTariff: () -> Unit, modifier: Modifier = Modifier) {
+fun MeterRoute(
+    onEditTariff: () -> Unit,
+    onViewHistory: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
     val context = LocalContext.current
     val application = context.applicationContext as TaxiInspectorApplication
     val viewModel: MeterViewModel = viewModel(
@@ -127,7 +131,11 @@ fun MeterRoute(onEditTariff: () -> Unit, modifier: Modifier = Modifier) {
     MeterScreen(
         state = state,
         onAction = { action ->
-            if (action == MeterAction.EditTariff) onEditTariff() else viewModel.onAction(action)
+            when (action) {
+                MeterAction.EditTariff -> onEditTariff()
+                MeterAction.ViewHistory -> onViewHistory()
+                else -> viewModel.onAction(action)
+            }
         },
         modifier = modifier,
     )

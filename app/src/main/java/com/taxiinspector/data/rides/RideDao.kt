@@ -39,6 +39,9 @@ abstract class RideDao {
     @Query("SELECT * FROM ride_summary WHERE id = :id")
     abstract suspend fun summary(id: String): RideSummaryEntity?
 
+    @Query("SELECT * FROM ride_summary WHERE id = :id")
+    abstract fun observeSummary(id: String): Flow<RideSummaryEntity?>
+
     @Query("DELETE FROM ride_summary WHERE id = :id")
     abstract suspend fun deleteSummary(id: String)
 

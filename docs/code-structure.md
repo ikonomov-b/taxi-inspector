@@ -135,8 +135,12 @@ app/
     │   │   │   │   ├── TariffUiState.kt
     │   │   │   │   └── TariffScreen.kt
     │   │   │   └── history/
+    │   │   │       ├── HistoryRoute.kt
     │   │   │       ├── HistoryViewModel.kt
     │   │   │       ├── HistoryScreen.kt
+    │   │   │       ├── HistoryUiState.kt
+    │   │   │       ├── RideHistoryFormatter.kt
+    │   │   │       ├── RideDetailRoute.kt
     │   │   │       ├── RideDetailViewModel.kt
     │   │   │       └── RideDetailScreen.kt
     │   │   └── AppContainer.kt

@@ -42,6 +42,8 @@
     <string name="action_save_interrupted">Save as interrupted</string>
     <string name="action_reset">Reset</string>
     <string name="action_cancel">Cancel</string>
+    <string name="action_back">Back</string>
+    <string name="action_history">History</string>
 
     <!-- Confirmation -->
     <string name="discard_title">Discard ride?</string>
@@ -68,6 +70,36 @@
     <string name="tariff_summary">Initial %1$s · %2$s/km · %3$s/min</string>
     <string name="tariff_invalid_field">Enter a non-negative number with at most one decimal separator and six decimals.</string>
     <string name="tariff_needed_to_start">Save a tariff before starting a ride.</string>
+
+    <!-- Saved rides -->
+    <string name="history_title">Ride history</string>
+    <string name="history_empty">No saved rides</string>
+    <string name="history_empty_detail">Completed and explicitly saved interrupted rides appear here.</string>
+    <string name="history_total">Total %1$s</string>
+    <string name="history_distance">%1$s km</string>
+    <string name="history_status_completed">Completed</string>
+    <string name="history_status_interrupted">Interrupted</string>
+    <string name="history_row_description">Ride ended %1$s. %2$s. Total %3$s tariff units. Distance %4$s kilometres.</string>
+
+    <!-- Ride detail -->
+    <string name="ride_detail_title">Ride detail</string>
+    <string name="ride_detail_missing">This saved ride is no longer available.</string>
+    <string name="ride_detail_ended">Ended</string>
+    <string name="ride_detail_status">Status</string>
+    <string name="ride_detail_total">Final total</string>
+    <string name="ride_detail_distance">Distance</string>
+    <string name="ride_detail_wait">Wait time</string>
+    <string name="ride_detail_elapsed">Elapsed ride time</string>
+    <string name="ride_detail_locked_tariff">Locked tariff</string>
+    <string name="ride_detail_initial_tax">Initial tax</string>
+    <string name="ride_detail_per_km">Per km rate</string>
+    <string name="ride_detail_per_minute">Per minute car-still rate</string>
+    <string name="ride_detail_distance_value">%1$s km</string>
+    <string name="action_delete_ride">Delete saved ride</string>
+    <string name="delete_ride_title">Delete saved ride?</string>
+    <string name="delete_ride_body">This ride summary is deleted immediately. This cannot be undone.</string>
+    <string name="delete_ride_confirm">Delete ride</string>
+    <string name="delete_ride_failed">The saved ride could not be deleted.</string>
 
     <!-- Disclosure -->
     <string name="estimate_disclosure">Taxi Inspector is an independent estimate, not a certified taximeter. Tunnels, underground parking, and dense buildings reduce GPS quality and can make the estimate unreliable.</string>

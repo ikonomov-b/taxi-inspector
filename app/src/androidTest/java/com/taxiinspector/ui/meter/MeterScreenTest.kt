@@ -130,6 +130,15 @@ class MeterScreenTest {
     }
 
     @Test
+    fun historyOpensFromTheMeter() {
+        render(readyState())
+
+        composeRule.onNodeWithText("History").performScrollTo().performClick()
+
+        assertEquals(listOf(MeterAction.ViewHistory), actions)
+    }
+
+    @Test
     fun everyMeterValueAndStatusCarriesAScreenReaderLabel() {
         render(runningState())
 

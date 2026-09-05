@@ -12,21 +12,23 @@ This is the single authoritative progress record for implementation work. Update
 
 ## Current summary
 
-**Overall state: In progress — phases 0–6 complete; phase 7 is the next implementation gate.**
+**Overall state: In progress — phases 0–7 complete; phase 8 is the next implementation gate.**
 
-The project has a reproducible Gradle/Compose baseline, an exact Android-free fare core, an integration-tested Room layer, a GPS-only adapter that also reads satellite status so a dual-band fix can be told from a single-band one, a foreground-service tracking vertical slice, and a working Meter UI wired to that service. A user can now save a tariff, grant permissions, run a visible ride, pause/resume, stop and save, or discard after confirmation. History and ride detail remain unbuilt, so saved rides cannot yet be reviewed in the app.
+The project has a reproducible Gradle/Compose baseline, an exact Android-free fare core, an integration-tested Room layer, a GPS-only adapter that also reads satellite status so a dual-band fix can be told from a single-band one, a foreground-service tracking vertical slice, and a working four-destination UI. A user can save a tariff, run a visible ride, pause/resume, stop and save or discard after confirmation, then review the newest ten completed/interrupted summaries and delete an individual record after confirmation.
 
-Last verified: **2026-09-04**
+Last verified: **2026-09-05**
 
 ```text
 GRADLE_USER_HOME=/tmp/taxi-inspector-gradle \
 JAVA_HOME=/opt/android-studio-for-platform/jbr \
-./gradlew --no-daemon test connectedDebugAndroidTest
+./gradlew --no-daemon test assembleDebugAndroidTest
+scripts/test-instrumented.sh
+./gradlew --no-daemon lintDebug
 
 BUILD SUCCESSFUL
 ```
 
-The debug JVM report contains 22 tests and the API 35 instrumentation report contains 63 Room/location/service/UI tests, with 0 failures, 0 errors, and 0 skipped tests. Lint reported 0 errors. The same 63 instrumentation tests now also pass on a physical Pixel 8 Pro (Android 17), with no failures.
+The debug JVM report contains 22 tests and the API 35 instrumentation report contains 76 Room/location/service/UI tests, with 0 failures, 0 errors, and 0 skipped tests. Lint reported 0 errors. The preceding 63-test suite also passed on a physical Pixel 8 Pro (Android 17); the 13 new History tests have so far run on the API 35 emulator only.
 
 ## Phase tracker
 
@@ -39,7 +41,7 @@ The debug JVM report contains 22 tests and the API 35 instrumentation report con
 | 4. GPS-only location adapter | Complete | Android-free `LocationClient`, GPS-only `AndroidGpsLocationClient`, elapsed-realtime/sample mapping, provider availability checks, explicit 1 Hz subscription, and cancellation cleanup. A parallel `GnssStatus` subscription, the `GnssBandClassifier` carrier-frequency rule, and speed-accuracy/mock mapping were added afterwards (see the amendment below). | 9 API 35 fake-backed tests verify provider availability, subscription cadence, removal of both subscriptions, GPS/non-GPS mapping, optional speed, malformed-fix rejection, and band attachment including its stale and absent cases. 5 JVM tests cover the carrier-frequency rule itself. |
 | 5. Foreground tracking service | Complete | Non-sticky location FGS, serialized controller, explicit commands, prerequisite rechecks, bounded fare notifications, notification Pause/Stop, ownership binder, persisted pause/stop/discard, and interrupted recovery coordination. | 14 new API 35 tests cover prerequisite/foreground failures, command serialization, permission loss, paused Resume/Stop, Discard, throttling, ownership/recovery, real service binding, screen recreation/off, and actual notification actions. |
 | 6. Essential Meter UI | Complete | Vintage theme and `TaximeterFace`, `MeterScreen`/`MeterRoute`/`MeterViewModel` with immutable state, actions and one-off effects, a separate Tariff destination with exact-decimal validation, permission/GPS gating with Settings recovery, confirmed Discard, and bind-before-recovery wiring. | 32 API 35 tests cover the meter screen, tariff screen, meter state holder, and tariff state holder. Visual refinement of the meter face stays in Phase 9. |
-| 7. History and recovery UI | Not started | Persistence types exist; the meter already presents and can save or discard a recovered interrupted ride. | Implement list/detail destinations, individual deletion confirmation, and end-to-end persistence tests. |
+| 7. History and recovery UI | Complete | Newest-first History and full Ride Detail destinations observe Room directly; completed/interrupted summaries show their required final values and locked tariff, and individual deletion requires confirmation. | 13 new API 35 tests cover meter entry, empty/list/detail rendering, navigation actions, durable formatting, trimming, idempotent interrupted display, and confirmed deletion. |
 | 8. Quality, accessibility, privacy, and device validation | Not started | Build uses private local storage and has no network permission. | Complete real-device tests, accessibility tests, backup decision, disclosure, and store data-safety work. |
 | 9. Non-essential polish | Not started | — | Vintage visual refinement, onboarding, extra visual regression coverage, and any separately approved optional enhancements. |
 
@@ -76,14 +78,15 @@ The debug JVM report contains 22 tests and the API 35 instrumentation report con
 - A parallel `GnssStatus` subscription carries the latest band observation forward to fixes received within five seconds of it; a stale or absent observation leaves the fix `Unknown`
 - Location collection cancellation unregisters the exact platform listener and the satellite-status callback, and safely tolerates permission revocation
 
-### Meter and tariff UI
+### Meter, tariff, and history UI
 
-- `ui/TaxiInspectorApp.kt` and `ui/navigation/AppNavGraph.kt`: Meter and Tariff destinations; a first run with no saved tariff starts on Tariff
+- `ui/TaxiInspectorApp.kt` and `ui/navigation/AppNavGraph.kt`: Meter, Tariff, History, and Ride Detail destinations; a first run with no saved tariff starts on Tariff
 - `ui/theme/`: the warm paper/charcoal/yellow/LCD palette and the monospaced fare type
 - `ui/meter/MeterViewModel.kt`: derives display state from Room, gates Start/Resume on permissions and the GPS provider, and emits one-off effects
 - `ui/meter/MeterEffect.kt`: permission requests, Settings, service commands, and the ownership check the route performs
 - `ui/meter/MeterScreen.kt` and `TaximeterFace.kt`: state-specific controls, confirmed Discard, and per-value content descriptions
 - `ui/tariff/`: the tariff destination, its exact-decimal validation, and the ride lock
+- `ui/history/`: Room-backed newest-first history and ride detail state, locale-aware presentation, and confirmed individual deletion
 - `tracking/RideServiceOwnershipConnection.kt`: binds without `BIND_AUTO_CREATE` so recovery cannot be answered by a service it started
 
 ### Foreground tracking
@@ -107,14 +110,14 @@ The debug JVM report contains 22 tests and the API 35 instrumentation report con
 
 ## Next phase gate
 
-Implement Phase 7's history and interrupted-session UX:
+Execute Phase 8's quality, accessibility, privacy, and real-device validation:
 
-- add History and Ride Detail destinations to `ui/navigation/AppNavGraph.kt`, reached from the meter;
-- show newest-first summaries with end date/time, total, distance, and completed/interrupted status, and never a route;
-- require confirmation before deleting a saved record; and
-- test complete, discard, interrupted-save, deletion, and ten-record trimming end to end through the UI and repository.
+- test font scaling, TalkBack traversal, touch targets, contrast, common widths, and system insets;
+- field-test open streets, slow traffic, weak-signal areas, tunnels, background tracking, GPS/permission changes, service kill, force-stop, and reboot;
+- specifically exercise and quantify the 2.5 m dual-band movement floor before changing any GPS threshold; and
+- decide Android backup behaviour, finish estimate/privacy disclosure work, verify release logs, and record the store data-safety declaration.
 
-The meter already presents a recovered interrupted ride and can save or discard it, so Phase 7 adds review and deletion rather than recovery itself.
+Phase 8 is the release-readiness gate. Phase 9 visual polish must not displace its device, accessibility, or privacy evidence.
 
 ### Phase 3 — Durable local state
 
@@ -202,8 +205,31 @@ Verification:
 
 Remaining risk or next gate:
 - The meter face is functional and accessible but visually plain; the late-1970s styling, texture, and transitions are Phase 9 work.
-- Saved rides cannot yet be reviewed or deleted in the app; that is the Phase 7 gate.
+- Saved rides can now be reviewed and individually deleted through the Phase 7 History and Ride Detail destinations.
 - Real-device street, tunnel, weak-signal, and reboot validation of the whole flow remains a Phase 8 gate.
+
+### Phase 7 — History and interrupted-session UX
+
+Status: Complete
+Date: 2026-09-05
+Delivered:
+- Added History and Ride Detail destinations reached from the meter, with back navigation and a missing-record state.
+- Added Room-backed state holders and locale-aware presentation for the newest ten summaries, including end date/time, final total, distance, completed/interrupted status, wait duration, elapsed duration, and every locked tariff value.
+- Added reactive single-summary observation without changing the Room schema; history and detail remain projections of durable Room state and contain no route or coordinates.
+- Added individual deletion from Ride Detail with an explicit confirmation dialog, durable-success navigation, and a visible failure state.
+
+Verification:
+- Command: `GRADLE_USER_HOME=/tmp/taxi-inspector-gradle JAVA_HOME=/opt/android-studio-for-platform/jbr ./gradlew --no-daemon test assembleDebugAndroidTest`
+- Result: `BUILD SUCCESSFUL`; 22 debug JVM tests passed and both instrumentation APKs compiled.
+- Command: `GRADLE_USER_HOME=/tmp/taxi-inspector-gradle JAVA_HOME=/opt/android-studio-for-platform/jbr scripts/test-instrumented.sh`
+- Result: `BUILD SUCCESSFUL`; all 76 API 35 emulator tests passed with 0 failures, errors, or skips. The 13 new tests cover History entry, empty/list/detail rendering, row actions and semantics, locked-summary formatting, ten-record trimming, one-row interrupted retry behavior, and confirmed deletion that preserves unrelated history.
+- Command: `GRADLE_USER_HOME=/tmp/taxi-inspector-gradle JAVA_HOME=/opt/android-studio-for-platform/jbr ./gradlew --no-daemon lintDebug`
+- Result: `BUILD SUCCESSFUL`; 0 errors.
+
+Remaining risk or next gate:
+- The new History UI has emulator coverage but has not yet had the Phase 8 font-scaling, TalkBack, adaptive-layout, or physical-device pass.
+- Begin wall-clock time is not stored or displayed: summaries retain an end UTC timestamp and monotonic elapsed duration. Inferring begin time by subtraction could be wrong if the device clock changed during a ride; trustworthy begin display would require an explicitly persisted start UTC field and a Room migration.
+- Complete Phase 8 device, accessibility, backup/privacy, disclosure, and release-log validation.
 
 ### Phase 2 amendment — distance and waiting time are mutually exclusive
 

@@ -83,6 +83,7 @@ class MeterViewModel(
     fun onAction(action: MeterAction) {
         when (action) {
             MeterAction.EditTariff -> Unit // The route navigates; nothing here changes.
+            MeterAction.ViewHistory -> Unit // The route navigates; nothing here changes.
             MeterAction.Reset -> reset()
             MeterAction.StartRide -> requestLaunch(RideCommand.Start)
             MeterAction.ResumeRide -> requestLaunch(RideCommand.Resume)
@@ -316,4 +317,3 @@ private fun MeterRecovery.isStillNeeded(environment: MeterEnvironment): Boolean 
     MeterRecovery.GrantNotifications -> !environment.hasNotificationPermission
     MeterRecovery.EnableGps -> !environment.isGpsProviderEnabled
 }
-

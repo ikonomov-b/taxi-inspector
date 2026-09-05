@@ -17,6 +17,9 @@ class RoomRideRepository(private val dao: RideDao) {
         rows.map(RideSummaryEntity::toDomain)
     }
 
+    fun observeSummary(id: String): Flow<SavedRideSummary?> =
+        dao.observeSummary(id).map { it?.toDomain() }
+
     suspend fun currentTariff(): Tariff? = dao.settings()?.toDomainTariff()
 
     suspend fun currentActiveRide(): ActiveRide? = dao.activeRide()?.toDomain()

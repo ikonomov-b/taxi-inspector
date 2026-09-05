@@ -1,17 +1,27 @@
 package com.taxiinspector.ui.navigation
 
+import android.net.Uri
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
+import androidx.navigation.NavType
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
+import androidx.navigation.navArgument
+import com.taxiinspector.ui.history.HistoryRoute
+import com.taxiinspector.ui.history.RideDetailRoute
 import com.taxiinspector.ui.meter.MeterRoute
 import com.taxiinspector.ui.tariff.TariffRoute
 
-/** The app's destinations. History and Ride Detail arrive with Phase 7. */
+/** The app's four destinations. */
 object Destinations {
     const val METER = "meter"
     const val TARIFF = "tariff"
+    const val HISTORY = "history"
+    const val RIDE_ID_ARGUMENT = "rideId"
+    const val RIDE_DETAIL = "ride/{$RIDE_ID_ARGUMENT}"
+
+    fun rideDetail(rideId: String): String = "ride/${Uri.encode(rideId)}"
 }
 
 @Composable
@@ -23,7 +33,10 @@ fun AppNavGraph(startDestination: String, modifier: Modifier = Modifier) {
         modifier = modifier,
     ) {
         composable(Destinations.METER) {
-            MeterRoute(onEditTariff = { navController.navigate(Destinations.TARIFF) })
+            MeterRoute(
+                onEditTariff = { navController.navigate(Destinations.TARIFF) },
+                onViewHistory = { navController.navigate(Destinations.HISTORY) },
+            )
         }
         composable(Destinations.TARIFF) {
             // Tariff is the start destination on first run, so there is nothing to return
@@ -44,6 +57,28 @@ fun AppNavGraph(startDestination: String, modifier: Modifier = Modifier) {
                 } else {
                     null
                 },
+            )
+        }
+        composable(Destinations.HISTORY) {
+            HistoryRoute(
+                onBack = { navController.popBackStack() },
+                onRideSelected = { rideId ->
+                    navController.navigate(Destinations.rideDetail(rideId))
+                },
+            )
+        }
+        composable(
+            route = Destinations.RIDE_DETAIL,
+            arguments = listOf(
+                navArgument(Destinations.RIDE_ID_ARGUMENT) { type = NavType.StringType },
+            ),
+        ) { backStackEntry ->
+            val rideId = requireNotNull(
+                backStackEntry.arguments?.getString(Destinations.RIDE_ID_ARGUMENT),
+            )
+            RideDetailRoute(
+                rideId = rideId,
+                onBack = { navController.popBackStack() },
             )
         }
     }

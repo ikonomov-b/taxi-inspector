@@ -103,6 +103,15 @@ fun MeterScreen(
 
             CurrentTariff(state, onAction)
 
+            OutlinedButton(
+                onClick = { onAction(MeterAction.ViewHistory) },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(min = 48.dp),
+            ) {
+                Text(stringResource(R.string.action_history))
+            }
+
             Text(
                 text = stringResource(R.string.estimate_disclosure),
                 style = MaterialTheme.typography.bodySmall,
