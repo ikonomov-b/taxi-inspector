@@ -2,7 +2,7 @@
 
 ## Goal and scope
 
-This structure supports a single Android application with an on-device tariff, GPS-driven active ride, foreground tracking service, and a local history of ten rides. It deliberately uses **one Gradle app module**. Splitting such a small offline application into feature modules would add build and dependency complexity without a present benefit.
+This structure supports a single Android application with up to ten named on-device taxi-company tariffs, one pre-ride selection, a GPS-driven active ride, foreground tracking service, and a local history of ten rides. It deliberately uses **one Gradle app module**. Splitting such a small offline application into feature modules would add build and dependency complexity without a present benefit.
 
 The design separates Android UI, storage/location adapters, and the small set of pure fare rules. It follows unidirectional data flow: the UI sends actions, state holders coordinate them, and immutable state flows back to the UI. This is a lightweight application of Android’s UI/data-layer guidance, not a multi-module “clean architecture” implementation. [Android architecture guide](https://developer.android.com/topic/architecture)
 
@@ -15,7 +15,7 @@ The design separates Android UI, storage/location adapters, and the small set of
 | State | `ViewModel`, `StateFlow`, lifecycle-aware collection | UI survives rotation and reacts to the single source of truth. |
 | Background work | `RideTrackingService`, a `location` foreground service | An active, user-visible ride continues with the screen locked or app backgrounded. |
 | GPS | `LocationManager` GPS provider plus `GnssStatus` | Fare distance is GPS-only; no Google Play Services dependency is required. Satellite status is read only to tell a single-band fix from a dual-band one. |
-| Settings, active ride, and history | Room | One private, local source of truth with transactional start, completion, recovery, and history trimming. |
+| Company tariffs, settings, active ride, and history | Room | One private, local source of truth with transactional company selection, start, completion, recovery, and history trimming. |
 | Object construction | Small `AppContainer` | Explicit construction is clearer than a DI framework at this size. |
 | Tests | JUnit, kotlinx-coroutines-test, Room tests, Compose UI tests | Covers fare correctness first, then Android integration. |
 
@@ -157,10 +157,11 @@ app/
 
 ```text
 Tariff(initialTax, perKmRate, perMinuteStillRate) // all in one user-defined unit
-ActiveRide(id, tariff, phase, trackingStatus, distanceMeters, idleMillis,
+TaxiCompany(id, name, tariff)
+ActiveRide(id, companyName, tariff, phase, trackingStatus, distanceMeters, idleMillis,
            movingOrIdle, startedAt, lastConfirmedAt, lastBillablePoint,
            speedCandidateState)
-RideSummary(id, tariff, total, distanceMeters, idleMillis, elapsedMillis,
+RideSummary(id, companyName, tariff, total, distanceMeters, idleMillis, elapsedMillis,
             endedAt, status)
 ```
 
@@ -168,11 +169,14 @@ RideSummary(id, tariff, total, distanceMeters, idleMillis, elapsedMillis,
 - Durations are stored as integer milliseconds; timestamps use UTC epoch milliseconds for history display.
 - GPS interval calculations use elapsed-realtime values, not wall-clock time, so a device clock change cannot create a false wait charge. A sample whose elapsed timestamp is not greater than the previous accepted timestamp is rejected.
 - A `LocationSample` contains only the input needed for a calculation: coordinates, accuracy, provider, speed and speed accuracy when available, the GNSS band that produced the fix, whether the fix was mocked, received elapsed time, and fix elapsed time. It is never written to ride history. A billable sample is GPS-only, unmocked, fresh, monotonic, and accurate to 20 m or better; weaker 20–60 m samples are status-only. The band is `Dual`, `Single`, or `Unknown`, and `Unknown` is treated exactly as `Single`, so a device that cannot report carrier frequency simply keeps the stricter movement floor.
-- `ActiveRide` is the sole persisted active-session row. It contains one temporary last billable GPS point only; it is deleted or converted to a summary when the ride ends. Its phase is one of `Running`, `Paused`, or `PendingInterrupted`; a separate tracking status represents `Searching`, `Good`, `Weak`, `GpsLost`, or `PermissionNeeded`. Terminal outcomes exist only in summaries.
+- A `TaxiCompany` is editable local metadata around exactly one `Tariff`; its user-entered name is not a verified business identity and never enters fare arithmetic.
+- `ActiveRide` is the sole persisted active-session row. It contains the locked company-name/tariff snapshot and one temporary last billable GPS point only; it is deleted or converted to a summary when the ride ends. Its phase is one of `Running`, `Paused`, or `PendingInterrupted`; a separate tracking status represents `Searching`, `Good`, `Weak`, `GpsLost`, or `PermissionNeeded`. Terminal outcomes exist only in summaries.
 
-Room stores one `AppSettingsEntity` (including the current tariff), one `ActiveRideEntity`, and `RideSummaryEntity` rows. `RoomRideRepository` is the sole data access point. Starting a ride atomically reads and copies the tariff into the active row. `RideDao.finishRide()` runs in a database transaction: insert the summary, delete the active row, and remove rows older than the ten newest. This makes the ten-ride limit correct even if the process stops during a save. The current tariff is copied into every active/saved ride, so historic totals remain reproducible in their original tariff units.
+Room stores up to ten `TaxiCompanyEntity` rows, one `AppSettingsEntity` containing the selected company id, one `ActiveRideEntity`, and `RideSummaryEntity` rows. `RoomRideRepository` is the sole data access point. Company creation enforces the ten-row limit transactionally and rejects overflow without automatic eviction. Names are stored trimmed, limited to 80 characters, and checked for case-insensitive duplicates. Company creation, selection, editing, and confirmed deletion are rejected while an active ride exists. Deleting the selected company clears the selection; Start remains unavailable until another existing company is explicitly selected.
 
-The database has an explicit version and forward migrations. Destructive migration is prohibited: an update must preserve tariff and history data, and every migration has a Room migration test. The active row is updated after every accepted GPS point, every one-second tick that changes wait cost, and every pause/resume/stop state transition. At most one small local write per second occurs during an idle ride.
+Starting a ride atomically resolves the selected company and copies its name and tariff into the active row. Neither active nor historic display joins back to mutable company data. `RideDao.finishRide()` runs in a database transaction: insert the already locked snapshot as a summary, delete the active row, and remove rows older than the ten newest. This makes the ten-ride history limit correct even if the process stops during a save, and company edits or deletion cannot change historic identity or totals.
+
+The database has an explicit version and forward migrations. Destructive migration is prohibited: an update must preserve company tariffs, selection where possible, active state, and history data, and every migration has a Room migration test. The version-1 singleton tariff migrates to one selected placeholder company without changing its exact values; pre-company active rides and summaries keep their tariff and use an explicit legacy/unavailable company label. The active row is updated after every accepted GPS point, every one-second tick that changes wait cost, and every pause/resume/stop state transition. At most one small local write per second occurs during an idle ride.
 
 ## Fare and session logic
 
@@ -208,7 +212,7 @@ The existing name `idleMillis` is valid only for the current stationary-wait con
 
 An approved provisional estimator also needs a distinct visible status such as `GpsLostEstimating`; reusing `GpsLost` with its current “fare frozen” presentation while the total advances would be false. That status remains domain-owned and is rendered consistently by the notification and Meter UI.
 
-Before adding reconstruction, fix the current boundary behavior so a Weak status cannot continue billing from an earlier speed, use a consistent half-open rule at the 15-second loss boundary, and add deterministic tests for both possible ticker/location arrival orders.
+The reconstruction precondition is now established: a Weak status clears prior speed and distance eligibility immediately, segment continuity uses the latest accepted-fix timestamp rather than the potentially older distance-noise baseline, and the 15-second loss boundary is half-open and deterministic for both ticker/location arrival orders. Reconstruction itself remains contingent on the field evidence and product decisions above.
 
 ## Background tracking flow
 
@@ -235,17 +239,20 @@ The service runs `START_NOT_STICKY`. Service liveness is not inferred from an `A
 
 ## UI structure and state
 
-The app has four destinations: Meter, Tariff, History, and Ride Detail. Tariff is its own destination rather than a sheet on Meter, so the fare reading never shares a screen with entry fields and a soft keyboard. A first run with no saved tariff starts on Tariff; every later visit is reached from the meter's Edit control.
+The app has Meter, Taxi Companies, Company Editor, History, and Ride Detail destinations. The company editor remains separate from Meter, so the fare reading never shares a screen with entry fields and a soft keyboard. A first run with no saved companies starts in company creation. Later visits use **Manage companies**, while an accessible Meter selector changes the durable selected company before Start without exposing editable tariff fields.
+
+Meter observes the company list, selected company, and active ride from Room. Before a ride it shows the selected profile and permits selection; without a selection, Start is disabled. During Running, Paused, or Pending interrupted, it renders the company-name/tariff snapshot from `ActiveRide` and disables selection and management. Ride Detail renders the snapshot in `RideSummary`, so source-company edits and deletion cannot rewrite history.
 
 Each screen has one `ViewModel` with a public immutable `UiState` and a single action entry point:
 
 ```kotlin
 data class MeterUiState(
     val presentation: MeterPresentation = MeterPresentation.EMPTY,
-    val savedTariff: TariffSummary? = null,
+    val companies: List<CompanySummary> = emptyList(),
+    val selectedCompany: CompanySummary? = null,
     val status: MeterStatus = MeterStatus.TariffNeeded,
     val canStart: Boolean = false,
-    val canEditTariff: Boolean = true,
+    val canManageCompanies: Boolean = true,
     val isDiscardConfirmationVisible: Boolean = false,
     val recovery: MeterRecovery? = null,
     val message: MeterMessage? = null
@@ -258,7 +265,7 @@ fun onAction(action: MeterAction)
 
 Permission and GPS-provider state are Android facts a ViewModel must not read. The route inspects them whenever the screen resumes and after a permission dialog closes, and reports them as an explicit `MeterEnvironment` value. The ViewModel therefore decides *whether* a Start may proceed while the route decides *how* to ask.
 
-Because a derived `StateFlow` may not have recomposed when an action arrives, each state holder also mirrors the durable values its actions depend on (the saved tariff and the active ride) in plain fields updated by the same collectors. An action reads the mirror; the repository transaction remains the final guard.
+Because a derived `StateFlow` may not have recomposed when an action arrives, each state holder also mirrors the durable values its actions depend on (the selected company and the active ride) in plain fields updated by the same collectors. An action reads the mirror; repository and DAO transactions remain the final guards.
 
 ViewModels never hold `Context`, `Location`, a `Service`, or mutable fare state. The service and repositories expose `Flow`s; ViewModels combine them for display. This prevents an orientation change or screen recreation from altering a ride.
 
@@ -296,9 +303,9 @@ Avoid generic `BaseViewModel`, repository base classes, event buses, global muta
 | Unit | `DecimalAmount`, `FareCalculator` | decimal-comma normalization, currency-neutral formatting, precision, half-up rounding, and known fare totals. |
 | Unit | `RideEngine` | non-retroactive 1 Hz idle entry, 0.8/1.3 m/s hysteresis, stale-speed expiry, immediate Weak freezing, weak/out-of-order fixes, deterministic 15-second GPS loss, and pause/resume. If gap reconstruction is approved: accepted/rejected recovery, exact-once interval attribution, uncertainty/cross-over boundaries, and measured-versus-estimated aggregates. |
 | Unit | ViewModels | permission/status states and actions using a fake repository. |
-| Instrumented | Room DAO/repository | active-to-summary transaction, history trimming to 10, persistence after recreation. |
+| Instrumented | Room DAO/repository | company limit/selection and active lock, version-1 migration, active-to-summary transaction, history trimming to 10, persistence after recreation. |
 | Instrumented | Service/location adapter | foreground command handling, fake location updates, notification actions, discard confirmation path, service-bind-before-recovery, and idempotent interrupted-session recovery. |
-| Compose UI | Meter, tariff screen, history/detail | formatted display, confirmations, accessibility labels, dynamic text. |
+| Compose UI | Meter, company list/editor, history/detail | pre-ride selection, company validation/limit, formatted display, confirmations, accessibility labels, dynamic text. |
 | Manual device | real GPS/background | screen lock, GPS toggle, weak signal, permission revocation, notification denial, process death, force-stop, reboot, and street/slow-traffic/urban-canyon/tunnel field validation. Compare current and candidate gap policies against a reference taximeter by gap-duration bucket before approving reconstruction constants. |
 
 Keep test fakes alongside their consumers. For example, `FakeLocationClient` sits beside tracking tests rather than mocking `LocationManager`. Every documented fare threshold has a named unit test.
@@ -311,6 +318,7 @@ Keep test fakes alongside their consumers. For example, `FakeLocationClient` sit
 4. Implement the GPS adapter and foreground service with fake-location tests for billable/weak/lost fixes, foreground start failure, and safe pause/resume.
 5. Build the Meter destination and the separate Tariff destination, explicit Stop & save/Discard ride controls, permission/status handling, then attach them to the service command path.
 6. Build history/detail and recovery flows.
-7. Complete Compose accessibility tests and manual real-device background/GPS validation.
+7. Add the essential saved-company list, pre-ride selection, version-1 migration, and locked company snapshots.
+8. Complete Compose accessibility tests and manual real-device background/GPS validation against the final company-selection flow.
 
-Before release, pin the tested Android/Compose/Room versions in the version catalog, decide whether private ride summaries participate in Android backup, and publish the estimate-only/privacy disclosure and Play data-safety declaration. This order validates the fare rules before any visual implementation and keeps Android lifecycle code away from the calculation core.
+Before release, complete the saved-company and pre-ride-selection amendment, pin the tested Android/Compose/Room versions in the version catalog, decide whether private company tariffs and ride summaries participate in Android backup, and publish the estimate-only/privacy disclosure and Play data-safety declaration. This order validates the fare rules before any visual implementation and keeps Android lifecycle code away from the calculation core.

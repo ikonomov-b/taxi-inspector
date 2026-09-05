@@ -8,7 +8,8 @@ The essential path is:
 
 ```text
 reproducible build → exact fare rules → durable session state → GPS/foreground service
-→ usable meter flow → failure recovery → history → accessibility and polish
+→ usable meter flow → failure recovery → history → saved company tariffs
+→ accessibility and polish
 ```
 
 Do not start a later phase until the exit criteria for the current phase are met. The final phase contains improvements that are valuable but must not delay a correct, safe first build.
@@ -19,7 +20,7 @@ Do not start a later phase until the exit criteria for the current phase are met
 - The active fare engine is the only place that calculates a total. UI code, Room entities, and location adapters never calculate a fare independently.
 - Ambiguous GPS data freezes billing. The app does not estimate an unobserved gap unless Phase 8 field evidence leads to an explicit, documented bounded-reconstruction amendment; the current implementation must not be described as having that amendment.
 - The foreground service is the sole owner and writer of a running ride. The UI only observes state and sends explicit commands.
-- An active ride always uses the tariff locked at Start; later tariff changes cannot alter it.
+- An active ride always uses the selected taxi-company name and tariff locked at Start; later company edits, selection changes, or deletion cannot alter it.
 - No route, raw location history, network request, account, analytics event, or advertising identifier is introduced.
 - Do not add a library, module, abstraction, or feature unless it is required by a documented phase below.
 
@@ -40,7 +41,7 @@ Create a small state-transition table in code comments/tests before implementing
 
 | Session phase | Tracking status | Billing | Allowed commands |
 | --- | --- | --- | --- |
-| Ready | Permission needed / GPS disabled | None | Save tariff, Start after recovery |
+| Ready | Company selection / permission / GPS state | None | Save or select a company tariff, Start after recovery |
 | Running | Searching / Good / Weak / GPS lost | Only Good and fresh eligible time | Pause, Stop & save, Discard ride |
 | Paused | Last known status | Frozen | Resume from visible UI, Stop & save, Discard ride |
 | Pending interrupted | N/A | Permanently frozen | Save as interrupted, Discard |
@@ -118,7 +119,7 @@ Implement the contract exactly:
 
 - accepted samples are GPS-only, fresh, monotonic, and accurate to 20 m or better;
 - 20–60 m samples are status-only and never change fare values;
-- segments over 15 seconds, out-of-order samples, and implausible jumps are rejected;
+- segments separated by 15 seconds or more, out-of-order samples, and implausible jumps are rejected;
 - moving/idle hysteresis enters Idle only after five completed low-speed seconds without retroactive billing and exits only after three completed high-speed seconds;
 - stale/absent speed cannot add waiting time;
 - GPS loss freezes charges and the next good sample becomes a new baseline.
@@ -207,7 +208,7 @@ The service owns the only mutable active session. Serialize commands, location c
 
 For `START`:
 
-1. Verify precise permission, enabled GPS, editable saved tariff, and notification permission where applicable.
+1. Verify precise permission, enabled GPS, an existing selected company tariff, and notification permission where applicable.
 2. Start the service from the visible activity.
 3. Create the required notification/channel and promptly promote the service to foreground mode.
 4. Create/persist the locked active ride and begin GPS subscription.
@@ -305,6 +306,58 @@ Test complete, pause/resume, discard, interrupted recovery, save interrupted, in
 - History always reflects durable Room state and cannot show duplicate interrupted entries.
 - Saved records are reproducible from their locked tariff and totals alone.
 
+## Phase 7A — Add saved taxi companies and pre-ride selection
+
+This approved amendment must be complete before Phase 8 so accessibility, adaptive-layout, privacy, and device validation exercise the final pre-ride flow. It extends the completed persistence, Meter UI, and History phases without changing fare arithmetic or GPS policy.
+
+### Step 7A.1: Freeze company and selection behaviour
+
+- Model a saved taxi company as a stable local identifier, a user-entered name, and exactly one existing three-value `Tariff`.
+- Retain at most ten companies. Reject an eleventh add with a clear UI state; never evict a company automatically.
+- Trim names, reject blank names or names longer than 80 characters, and reject duplicates after trimming and case-insensitive comparison so the picker is unambiguous.
+- Persist one selected company. The first saved company becomes selected; deleting the selected company requires confirmation and leaves no selection, so Start remains unavailable until the user explicitly selects another.
+- Allow company creation, selection, editing, and deletion only while no ride is active. A running, paused, or pending-interrupted ride keeps its locked company and tariff.
+- Treat company names as user-provided labels, not verified business identities. Continue to store no currency identity or conversion.
+
+### Step 7A.2: Migrate and extend Room state
+
+- Add a `TaxiCompanyEntity` table containing the stable id, name, and canonical-string tariff values.
+- Change the singleton app settings row to retain the selected company id instead of duplicating an editable tariff.
+- Add a company-name snapshot to active rides and saved summaries. Historic and active display must not join back to a mutable company row.
+- Bump the database version, export the new schema, register a forward migration, and prohibit destructive fallback.
+- Migrate the version-1 singleton tariff into a selected placeholder company without changing its exact values. Existing active rides and summaries retain their tariffs and use an explicit unavailable/legacy company label rather than inventing a real business identity.
+
+### Step 7A.3: Make selection and Start transactional
+
+- Expose observable company-list and selected-company state through `RoomRideRepository`; keep Room as the only persistent source of truth.
+- Implement create, edit, select, and confirmed delete operations with repository/DAO transactions that enforce the ten-company limit and active-ride lock.
+- Start atomically resolves the selected company and copies both its name and exact tariff into the new active snapshot. A missing or stale selection creates no active ride and returns an actionable rejection.
+- Finishing or saving an interrupted ride copies the already locked company name and tariff into history. Editing or deleting a saved company cannot change an active or historic ride.
+
+### Step 7A.4: Add company management and pre-ride selection UI
+
+- Evolve the Tariff destination into a company-list and company-editor flow while reusing the existing exact-decimal validation and separate-screen keyboard boundary.
+- On first run with no companies, open the create-company flow and provide no path to Start until a valid company is saved.
+- Show an accessible company selector directly on Meter before Start. Each option shows its name and enough tariff detail to distinguish it; changing it durably selects the whole profile.
+- Show the locked company name and tariff while a ride is active, with selection and management controls disabled.
+- Show the locked company name in Ride Detail and use an explicit legacy label for summaries created before the migration.
+- Provide clear empty, duplicate-name, ten-company-limit, save-failure, and confirmed-delete states without adding a currency label.
+
+### Step 7A.5: Verify migration, locking, and UI behaviour
+
+- Add Room tests for the ten-company limit including concurrent adds, selection persistence, selected-company deletion, active-ride mutation guards, atomic Start locking, and company deletion/editing leaving active and historic snapshots unchanged.
+- Add a version-1-to-version-2 migration test that preserves the editable tariff, any active ride, all summaries, exact decimal strings, and history order.
+- Add state-holder and Compose tests for first run, add/edit/select/delete, duplicate and limit validation, recreation, selection before Start, locked active display, legacy history display, semantic labels, and large-font layout.
+- Re-run all fare, service, recovery, history, and notification tests to prove this metadata feature does not alter billing or service ownership.
+
+### Exit criteria
+
+- Zero to ten named taxi-company tariffs survive process recreation, and an eleventh cannot be inserted or cause silent eviction.
+- A ride can start only with an existing explicitly selected company, and its name and tariff are copied together in one transaction.
+- Active and saved rides remain reproducible after the source company is renamed or deleted.
+- The version-1 forward migration preserves all existing tariff, active-ride, and history data without destructive fallback.
+- The Meter selector and company-management flow pass Compose accessibility and recreation tests, and the complete JVM, instrumentation, and lint suites pass.
+
 ## Phase 8 — Validate quality, accessibility, and privacy
 
 ### Step 8.1: Accessibility and adaptive layout
@@ -333,7 +386,7 @@ Compare observed behaviour with the current design promise: weak or missing data
 - Replay the captured field traces through the current freeze policy and an offline candidate that uses the last and next billable endpoints, elapsed gap, positional uncertainty, and average speed. Linear interpolation must not be treated as recovered route geometry. For short gaps, evaluate trusted endpoint-speed integration separately rather than assuming it improves the chord.
 - For mode S, evaluate `max(distanceRate × recoveredDistance, timeRate × gapDuration)` and provisional time-rate accrual during a continuously service-owned outage. For mode D, evaluate the sum and treat it as an explicit whole-product contract change. If the target uses stationary-only waiting, do not assume endpoint average speed reconstructs a mixed interval.
 - Choose or reject a maximum position-derived recovery gap, uncertainty adjustment, duration-scaled plausibility bound, and short-gap speed estimator from the measured error distribution. Decide separately whether a verified time-tariff floor may continue through longer outages. Record the decision in the design and project memory.
-- Before any production reconstruction, fix immediate Weak freezing and the exact 15-second event-order boundary. Add JVM tests at 5, 14, 15, 16, 30, 60, and 120 seconds, including straight movement, curved-route under-read, stationary drift, stop-and-go ambiguity, implausible reacquisition, Pause, permission loss, process interruption, and reboot.
+- Preserve the implemented reconstruction prerequisites: immediate Weak freezing, continuity measured from the latest accepted fix, and the deterministic half-open 15-second boundary. Keep JVM coverage at 5, 14, 15, 16, 30, 60, and 120 seconds, and expand the field/replay corpus to include straight movement, curved-route under-read, stationary drift, stop-and-go ambiguity, implausible reacquisition, Pause, permission loss, process interruption, and reboot.
 - For mode-S simulations with exact endpoints, prove that the candidate equals the time tariff for a stationary gap, equals the distance tariff for constant motion above cross-over, and is no greater than the reference fare for variable-speed or curved travel whose true path is at least the endpoint chord. Separately inject realistic endpoint error to measure when that lower-bound property is lost and tune or reject the uncertainty adjustment.
 - If reconstruction is approved, add one explicit pure-domain gap input and an exact-once fare-attribution watermark. Keep measured and reconstructed aggregates separate, expose the estimate in Meter/Ride Detail, and migrate Room without storing a route or timestamp stream. Apply the chosen taximeter mode consistently to ordinary and reconstructed intervals; rename `idleMillis` if it becomes general tariff-time duration.
 - If provisional time fare changes the total during GPS loss, add a distinct domain/UI/notification status and accessibility text; the existing “fare frozen” wording must remain reserved for intervals that cannot bill.
@@ -367,7 +420,8 @@ These tasks must not delay the correctness, safety, privacy, or accessibility wo
 Version 1 is ready only when all essential phases are complete and the acceptance criteria in `taxi-inspector-design.md` pass. The defining properties are:
 
 - exact, currency-agnostic tariff-unit arithmetic;
+- an on-device list of no more than ten named taxi-company tariffs with an explicit durable selection before Start;
 - conservative GPS billing with visible quality/loss states;
 - an inspectable foreground ride that does not silently resume;
-- durable, reproducible local summaries without stored routes; and
+- durable, reproducible company-name/tariff snapshots and local summaries without stored routes; and
 - an accessible, understandable meter flow in which saving and discarding cannot be confused.

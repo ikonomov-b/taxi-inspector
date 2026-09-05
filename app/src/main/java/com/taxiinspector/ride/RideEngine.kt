@@ -101,15 +101,15 @@ object RideEngine {
         if (ride.phase != RidePhase.Running) return ride
         // A synthetic fix must never reach the fare: this app's output is meant to be
         // evidence, and a mock provider can manufacture any distance it likes.
-        if (sample.isMock) return ride.copy(trackingStatus = TrackingStatus.Weak)
+        if (sample.isMock) return markWeak(ride, nowElapsedMillis)
         if (sample.provider != LocationSample.Provider.Gps || sample.accuracyMeters > WEAK_ACCURACY_METERS) {
-            return ride.copy(trackingStatus = TrackingStatus.Weak)
+            return markWeak(ride, nowElapsedMillis)
         }
         if (nowElapsedMillis - sample.fixElapsedMillis !in 0..FRESH_SAMPLE_MILLIS) {
-            return ride.copy(trackingStatus = TrackingStatus.Weak)
+            return markWeak(ride, nowElapsedMillis)
         }
         if (sample.accuracyMeters > BILLING_ACCURACY_METERS) {
-            return ride.copy(trackingStatus = TrackingStatus.Weak)
+            return markWeak(ride, nowElapsedMillis)
         }
         if (ride.lastAcceptedFixElapsedMillis != null &&
             sample.fixElapsedMillis <= ride.lastAcceptedFixElapsedMillis
@@ -117,11 +117,25 @@ object RideEngine {
             return ride
         }
 
-        val previousBaseline = ride.lastBillablePoint
-        val gapMillis = previousBaseline?.let { sample.fixElapsedMillis - it.fixElapsedMillis }
+        val acceptedFixGapMillis = ride.lastAcceptedFixElapsedMillis?.let {
+            sample.fixElapsedMillis - it
+        }
+        // Exactly 15 seconds is already GPS Lost. Reset before accepting the returning fix so
+        // location-before-tick and tick-before-location produce the same state and fare.
+        val rideBeforeSample = if (
+            acceptedFixGapMillis != null && acceptedFixGapMillis >= GPS_LOSS_MILLIS
+        ) {
+            markGpsLost(ride, nowElapsedMillis)
+        } else {
+            ride
+        }
+        val previousBaseline = rideBeforeSample.lastBillablePoint
+        val baselineGapMillis = previousBaseline?.let {
+            sample.fixElapsedMillis - it.fixElapsedMillis
+        }
         val segmentMeters = previousBaseline?.let { distanceBetweenMeters(it, sample) }
         val canUseSegment = previousBaseline != null &&
-            gapMillis != null && gapMillis in 1..GPS_LOSS_MILLIS &&
+            acceptedFixGapMillis != null && acceptedFixGapMillis in 1 until GPS_LOSS_MILLIS &&
             segmentMeters != null && segmentMeters <= MAXIMUM_SEGMENT_METERS
         val significantMeters = previousBaseline?.let {
             maxOf(significantMovementFloorMeters(it, sample), it.accuracyMeters, sample.accuracyMeters)
@@ -129,33 +143,41 @@ object RideEngine {
         val isSignificantSegment = canUseSegment && segmentMeters!! >= significantMeters!!
         // Distance and waiting time are mutually exclusive: a vehicle the engine considers
         // Idle is billed for time, so its movement advances the baseline without billing.
-        val distanceToAdd = if (isSignificantSegment && ride.motionState == MotionState.Moving) {
+        val distanceToAdd = if (
+            isSignificantSegment && rideBeforeSample.motionState == MotionState.Moving
+        ) {
             BigDecimal.valueOf(segmentMeters!!)
         } else {
             BigDecimal.ZERO
         }
 
         val canDeriveSpeed = previousBaseline != null &&
-            gapMillis != null && gapMillis in 1..FRESH_SAMPLE_MILLIS && segmentMeters != null
+            baselineGapMillis != null && baselineGapMillis in 1..FRESH_SAMPLE_MILLIS &&
+            segmentMeters != null
         val derivedSpeed = if (canDeriveSpeed) {
-            segmentMeters!! / (gapMillis!!.toDouble() / 1_000.0)
+            segmentMeters!! / (baselineGapMillis!!.toDouble() / 1_000.0)
         } else {
             null
         }
         val usableSpeed = sample.trustedSpeedMetersPerSecond() ?: derivedSpeed
         val nextBaseline = when {
             previousBaseline == null -> sample
-            gapMillis == null || gapMillis > GPS_LOSS_MILLIS -> sample
             segmentMeters != null && segmentMeters > MAXIMUM_SEGMENT_METERS -> sample
             // Advances on any significant segment, billed or not, so that leaving Idle
             // never measures back across an interval that was already billed as waiting.
             isSignificantSegment -> sample
             else -> previousBaseline
         }
+        val wasBillingFrozen = rideBeforeSample.trackingStatus != TrackingStatus.Good
 
-        return ride.copy(
+        return rideBeforeSample.copy(
             trackingStatus = TrackingStatus.Good,
-            distanceMeters = ride.distanceMeters.add(distanceToAdd),
+            distanceMeters = rideBeforeSample.distanceMeters.add(distanceToAdd),
+            lastTickElapsedMillis = if (wasBillingFrozen) {
+                maxOf(rideBeforeSample.lastTickElapsedMillis, nowElapsedMillis)
+            } else {
+                rideBeforeSample.lastTickElapsedMillis
+            },
             lastAcceptedFixElapsedMillis = sample.fixElapsedMillis,
             lastFreshBillableReceivedElapsedMillis = nowElapsedMillis,
             lastBillablePoint = nextBaseline,
@@ -163,6 +185,21 @@ object RideEngine {
             lastSpeedReceivedElapsedMillis = if (usableSpeed == null) null else nowElapsedMillis,
         )
     }
+
+    /**
+     * A Weak fix is an immediate billing boundary, not only a visible status change. Clear the
+     * held baseline so a later Good fix cannot bridge the uncertain interval, and clear speed
+     * eligibility/candidates so ticks cannot keep charging from an earlier trusted speed.
+     */
+    private fun markWeak(ride: ActiveRide, nowElapsedMillis: Long): ActiveRide = ride.copy(
+        trackingStatus = TrackingStatus.Weak,
+        lastTickElapsedMillis = maxOf(ride.lastTickElapsedMillis, nowElapsedMillis),
+        lastBillablePoint = null,
+        lastSpeedMetersPerSecond = null,
+        lastSpeedReceivedElapsedMillis = null,
+        lowSpeedCandidateMillis = 0,
+        highSpeedCandidateMillis = 0,
+    )
 
     private fun onTick(ride: ActiveRide, nowElapsedMillis: Long): ActiveRide {
         if (ride.phase != RidePhase.Running || nowElapsedMillis <= ride.lastTickElapsedMillis) return ride

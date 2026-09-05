@@ -12,23 +12,22 @@ This is the single authoritative progress record for implementation work. Update
 
 ## Current summary
 
-**Overall state: In progress — phases 0–7 complete; phase 8 is the next implementation gate.**
+**Overall state: In progress — phases 0–7 complete; the essential Phase 7A saved-company amendment is the next implementation gate, followed by Phase 8.**
 
-The project has a reproducible Gradle/Compose baseline, an exact Android-free fare core, an integration-tested Room layer, a GPS-only adapter that also reads satellite status so a dual-band fix can be told from a single-band one, a foreground-service tracking vertical slice, and a working four-destination UI. A user can save a tariff, run a visible ride, pause/resume, stop and save or discard after confirmation, then review the newest ten completed/interrupted summaries and delete an individual record after confirmation.
+The project has a reproducible Gradle/Compose baseline, an exact Android-free fare core, an integration-tested Room layer, a GPS-only adapter that also reads satellite status so a dual-band fix can be told from a single-band one, a foreground-service tracking vertical slice, and a working four-destination UI. A user can currently save one tariff, run a visible ride, pause/resume, stop and save or discard after confirmation, then review the newest ten completed/interrupted summaries and delete an individual record after confirmation. Before release, this singleton tariff flow must be replaced by the approved list of up to ten named taxi companies with a durable pre-ride selection and locked company-name/tariff snapshots.
 
 Last verified: **2026-09-05**
 
 ```text
 GRADLE_USER_HOME=/tmp/taxi-inspector-gradle \
 JAVA_HOME=/opt/android-studio-for-platform/jbr \
-./gradlew --no-daemon test assembleDebugAndroidTest
+./gradlew --no-daemon test lintDebug assembleDebugAndroidTest
 scripts/test-instrumented.sh
-./gradlew --no-daemon lintDebug
 
 BUILD SUCCESSFUL
 ```
 
-The debug JVM report contains 22 tests and the API 35 instrumentation report contains 76 Room/location/service/UI tests, with 0 failures, 0 errors, and 0 skipped tests. Lint reported 0 errors. The preceding 63-test suite also passed on a physical Pixel 8 Pro (Android 17); the 13 new History tests have so far run on the API 35 emulator only.
+The debug JVM report contains 27 tests and the API 35 instrumentation report contains 76 Room/location/service/UI tests, with 0 failures, 0 errors, and 0 skipped tests. Lint reported 0 errors. The preceding 63-test suite also passed on a physical Pixel 8 Pro (Android 17); the 13 new History tests and the five new fare-boundary tests have so far run on the API 35 emulator/JVM environment only.
 
 ## Phase tracker
 
@@ -36,12 +35,13 @@ The debug JVM report contains 22 tests and the API 35 instrumentation report con
 | --- | --- | --- | --- |
 | 0. Freeze product contract | Complete | Product, architecture, and step-by-step plan documents define tariff units, state behaviour, GPS policy, recovery, and scope. | Decisions are documented in `taxi-inspector-design.md`, `code-structure.md`, and `implementation-plan.md`. |
 | 1. Reproducible Android baseline | Complete | Gradle 8.7 wrapper, version catalog, Compose application shell, Java 17 target, Room/KSP configuration, API 35 SDK configuration, and environment record. | `./gradlew --no-daemon test` passes with Android Studio Panda JBR. |
-| 2. Pure fare core | Complete | `DecimalAmount`, tariff parsing/formatting, `FareCalculator`, immutable ride models, and Android-free `RideEngine`. Distance and waiting time were made mutually exclusive after Phase 6, and mock rejection, a band-dependent movement floor, and speed-confidence gating were added with the Phase 4 amendment (see both amendments below). | 21 JVM tests cover parsing, display rounding, known fare, idle entry, GPS loss, weak fixes, distance/waiting exclusivity, mock rejection, the dual-band movement floor, and a reported speed too coarse to trust. More boundary cases remain a future test-expansion task, not a blocker to this phase. |
+| 2. Pure fare core | Complete | `DecimalAmount`, tariff parsing/formatting, `FareCalculator`, immutable ride models, and Android-free `RideEngine`. Distance and waiting time were made mutually exclusive after Phase 6; mock rejection, a band-dependent movement floor, and speed-confidence gating followed; Weak and 15-second gap boundaries are now deterministic (see the amendments below). | 22 pure fare/decimal JVM tests cover parsing, display rounding, known fare, idle entry, GPS loss, immediate Weak freezing, latest-fix continuity, both event orders at exactly 15 seconds, the 5/14/15/16/30/60/120-second gap buckets, distance/waiting exclusivity, mock rejection, the dual-band movement floor, and speed confidence. More boundary cases remain a future test-expansion task, not a blocker to this phase. |
 | 3. Durable local state | Complete | Room v1 database, tariff/settings row, active-ride snapshot, summary history, atomic start/finish/interrupted-save transactions, ten-record trimming, repository, mappers, exported schema, and migration-test fixture. | 7 API 35 instrumentation tests verify tariff locking, finish rollback, concurrent interrupted-save idempotence, recreation mapping, deletion, trimming, and the exported v1 schema. UI/service wiring belongs to their later phases. |
 | 4. GPS-only location adapter | Complete | Android-free `LocationClient`, GPS-only `AndroidGpsLocationClient`, elapsed-realtime/sample mapping, provider availability checks, explicit 1 Hz subscription, and cancellation cleanup. A parallel `GnssStatus` subscription, the `GnssBandClassifier` carrier-frequency rule, and speed-accuracy/mock mapping were added afterwards (see the amendment below). | 9 API 35 fake-backed tests verify provider availability, subscription cadence, removal of both subscriptions, GPS/non-GPS mapping, optional speed, malformed-fix rejection, and band attachment including its stale and absent cases. 5 JVM tests cover the carrier-frequency rule itself. |
 | 5. Foreground tracking service | Complete | Non-sticky location FGS, serialized controller, explicit commands, prerequisite rechecks, bounded fare notifications, notification Pause/Stop, ownership binder, persisted pause/stop/discard, and interrupted recovery coordination. | 14 new API 35 tests cover prerequisite/foreground failures, command serialization, permission loss, paused Resume/Stop, Discard, throttling, ownership/recovery, real service binding, screen recreation/off, and actual notification actions. |
 | 6. Essential Meter UI | Complete | Vintage theme and `TaximeterFace`, `MeterScreen`/`MeterRoute`/`MeterViewModel` with immutable state, actions and one-off effects, a separate Tariff destination with exact-decimal validation, permission/GPS gating with Settings recovery, confirmed Discard, and bind-before-recovery wiring. | 32 API 35 tests cover the meter screen, tariff screen, meter state holder, and tariff state holder. Visual refinement of the meter face stays in Phase 9. |
 | 7. History and recovery UI | Complete | Newest-first History and full Ride Detail destinations observe Room directly; completed/interrupted summaries show their required final values and locked tariff, and individual deletion requires confirmation. | 13 new API 35 tests cover meter entry, empty/list/detail rendering, navigation actions, durable formatting, trimming, idempotent interrupted display, and confirmed deletion. |
+| 7A. Saved taxi companies and pre-ride selection | Not started | Approved essential release scope: up to ten named company tariffs, one durable selection, atomic company-name/tariff locking at Start, and immutable company labels in history. | Implement the Room v1→v2 migration, company repository transactions, Meter selector, management/editor flow, history label, and the verification specified in `implementation-plan.md`. Phase 8 cannot begin until these exit criteria pass. |
 | 8. Quality, accessibility, privacy, and device validation | Not started | Build uses private local storage and has no network permission. | Complete real-device tests, accessibility tests, backup decision, disclosure, and store data-safety work. |
 | 9. Non-essential polish | Not started | — | Vintage visual refinement, onboarding, extra visual regression coverage, and any separately approved optional enhancements. |
 
@@ -102,26 +102,26 @@ The debug JVM report contains 22 tests and the API 35 instrumentation report con
 2. On a device whose GPS fixes carry no reported speed, waiting time under-reads: derived speed is unavailable for part of a slow crawl, and a stationary vehicle's jitter keeps the engine out of Idle entirely. This follows the design rule that speed which cannot be obtained safely accrues no waiting time, and it errs towards under-reading rather than over-charging. Confirm it against a real device in Phase 8 before deciding whether the derivation needs its own last-accepted-fix reference.
 3. The meter face is functional and accessible but visually plain; the late-1970s styling, texture, and transitions remain Phase 9 work.
 4. Automated service tests use emulator/fake GPS inputs; real street, tunnel, and weak-signal field validation remains part of Phase 8.
-5. The database is still version 1, so the migration fixture validates the exported baseline but cannot exercise a forward migration until a future schema version exists.
+5. The database is still version 1. The essential Phase 7A company-list work requires the first forward migration and must preserve the singleton tariff, any active ride, and all summaries while adding company selection and locked company-name snapshots; the current fixture does not yet prove that migration.
 6. The local Android SDK path is machine-specific and remains in ignored `local.properties`; it must never be committed.
 7. Dual-band detection is now confirmed on real hardware (see the second Phase 4 amendment), but the 2.5 m movement floor itself has still never been exercised. The floor is `max(2.5 m, each endpoint's accuracy)`, and the measured accuracy at a window was 4.5 m, so the accuracy term dominated and the tighter floor never bound. It only binds below 2.5 m reported accuracy, which needs open sky. Note that a stationary hold cannot test it either: distance accrues only while the engine is Moving, so a parked vehicle bills nothing whatever the floor is. The discriminating test is steady slow movement at roughly 3 m/s over a measured distance, where 1 Hz segments of about 3 m fall between the two floors. A walk along a measured stretch of open pavement will settle it sooner than a drive, since a windscreen pushes accuracy back above 2.5 m and the floor stops binding again.
 8. In-vehicle behaviour is entirely unmeasured, and a car is harsher than anything tested so far. Two consequences are expected rather than hypothetical. Reported accuracy through a windscreen realistically runs 5-20 m rather than the 4.5 m measured at a window, so the accuracy term sets the movement floor, the 2.5 m dual-band value never binds, and below roughly 54 km/h at 1 Hz the segments fall under the deadband and accumulate as straight-line chords that under-read a curving road. And tunnels and underpasses trip the 15-second GPS Lost rule routinely rather than exceptionally, freezing the fare and resetting the baseline, where a real taximeter counting odometer pulses would not. Both err towards under-reading, which is the intended direction, but neither has been quantified. Phase 8 should capture a real drive before any threshold is revisited; phone placement (a windscreen cradle rather than a cupholder, and note that athermic glass attenuates GNSS badly) is likely to matter more than any constant.
 9. Instrumentation on a physical device needs preparation the emulator does not: animations disabled and the screen held awake, or Compose tests fail intermittently with `No compose hierarchies found in the app`. The commands are in `development-environment.md`. This is a runner caveat rather than an app defect, but it will bite anyone repeating the Phase 8 device runs.
-10. Bounded GPS-gap reconstruction is now documented as a Phase 8 accuracy proposal, not implemented behaviour. The current engine bridges a billable endpoint chord only while its baseline gap is at most 15 seconds and otherwise freezes. Before choosing a longer recovery window, Phase 8 must identify the reference taximeter's calculation mode and fare increment, compare signed and absolute fare error by gap length, and settle the maximum distance-recovery gap, uncertainty/plausibility bounds, and any short-gap speed estimator. For mode S the candidate is the larger of endpoint-distance fare and elapsed-time fare; for mode D it is their sum. Either must apply consistently to ordinary and reconstructed intervals. A production version would require pure-domain exact-once attribution, separate measured/estimated aggregates, visible disclosure, and probably a Room migration.
-11. The gap assessment exposed two current boundary risks that need tests before reconstruction: a Weak fix changes status without clearing an earlier trusted speed, so ticks may continue waiting billing for up to five seconds; and the segment rule accepts a gap of exactly 15 seconds while the loss rule triggers at exactly 15 seconds, so ticker-versus-location event order can change the result. Gap detection also currently uses the held noise baseline, whose point may be older than `lastAcceptedFixElapsedMillis`; a reconstruction design must distinguish those references.
+10. Bounded GPS-gap reconstruction is documented as a Phase 8 accuracy proposal, not implemented behaviour. The current engine bridges a billable endpoint chord only when consecutive accepted fixes are less than 15 seconds apart and otherwise freezes. Before choosing a longer recovery window, Phase 8 must identify the reference taximeter's calculation mode and fare increment, compare signed and absolute fare error by gap length, and settle the maximum distance-recovery gap, uncertainty/plausibility bounds, and any short-gap speed estimator. For mode S the candidate is the larger of endpoint-distance fare and elapsed-time fare; for mode D it is their sum. Either must apply consistently to ordinary and reconstructed intervals. A production version would require pure-domain exact-once attribution, separate measured/estimated aggregates, visible disclosure, and probably a Room migration.
 
 ## Next phase gate
 
-Execute Phase 8's quality, accessibility, privacy, and real-device validation:
+Implement Phase 7A's essential saved-company and pre-ride-selection amendment:
 
-- test font scaling, TalkBack traversal, touch targets, contrast, common widths, and system insets;
-- field-test open streets, slow traffic, weak-signal areas, tunnels, background tracking, GPS/permission changes, service kill, force-stop, and reboot;
-- specifically exercise and quantify the 2.5 m dual-band movement floor before changing any GPS threshold; and
-- decide Android backup behaviour, finish estimate/privacy disclosure work, verify release logs, and record the store data-safety declaration.
+- migrate Room v1 to v2 without losing the current tariff, active ride, or history;
+- add transactionally bounded create/edit/select/delete operations for up to ten named company tariffs;
+- atomically lock the selected company name and exact tariff into each active and saved ride;
+- replace the singleton Tariff flow with company management and an accessible Meter selector; and
+- pass the migration, repository, state-holder, Compose, service-regression, JVM, instrumentation, and lint checks in the amended implementation plan.
 
-Phase 8 is the release-readiness gate. Phase 9 visual polish must not displace its device, accessibility, or privacy evidence.
+Phase 7A is required for release and must complete before Phase 8. Phase 8 remains the release-readiness gate and must validate accessibility, adaptive layout, privacy, backup behaviour, and real-device operation against the final company-selection flow. Phase 9 visual polish must not displace either essential gate.
 
-After Phase 7, Phase 8 now includes a documented reference-taximeter comparison and an explicit decision gate for bounded GPS-gap reconstruction. The proposal does not authorize changing fare behaviour before that evidence and contract update.
+Phase 8 also includes a documented reference-taximeter comparison and an explicit decision gate for bounded GPS-gap reconstruction. The proposal does not authorize changing fare behaviour before that evidence and contract update.
 
 ### Phase 3 — Durable local state
 
@@ -257,6 +257,26 @@ Verification:
 Remaining risk or next gate:
 - Behaviour while Moving is unchanged: the baseline advances on exactly the segments it did before, so the documented noise rule still holds.
 - Real-device confirmation of the thresholds and of the no-reported-speed case remains a Phase 8 gate.
+
+### Phase 2 amendment 2 — deterministic Weak and GPS-loss boundaries
+
+Status: Complete
+Date: 2026-09-05
+Delivered:
+- Made every Weak location rejection an immediate billing boundary by clearing the retained speed, motion candidates, and distance baseline; a later Good fix cannot back-bill waiting or bridge distance across the uncertain interval.
+- Measured segment continuity from the latest accepted fix instead of the intentionally older distance-noise baseline, preserving cumulative sub-floor movement while accepted fixes remain continuous.
+- Made the valid segment window half-open: gaps below 15 seconds may bill, while exactly 15 seconds is GPS Lost. A returning location and the timeout tick now produce identical state and fare in either event order.
+- Kept bounded GPS-gap reconstruction unimplemented because its reference-taximeter mode, error evidence, and safe thresholds remain unresolved Phase 8 decisions.
+
+Verification:
+- Command: `GRADLE_USER_HOME=/tmp/taxi-inspector-gradle JAVA_HOME=/opt/android-studio-for-platform/jbr ./gradlew --no-daemon test lintDebug assembleDebugAndroidTest`
+- Result: `BUILD SUCCESSFUL`; 27 debug JVM tests passed, both instrumentation APKs compiled, and lint reported 0 errors.
+- Command: `GRADLE_USER_HOME=/tmp/taxi-inspector-gradle JAVA_HOME=/opt/android-studio-for-platform/jbr scripts/test-instrumented.sh`
+- Result: `BUILD SUCCESSFUL`; all 76 API 35 emulator tests passed with 0 failures, errors, or skips.
+
+Remaining risk or next gate:
+- The five new reducer tests cover immediate Weak freezing, no distance bridge after Weak, retained-noise-baseline continuity, both exact-boundary event orders, and 5/14/15/16/30/60/120-second gaps. Field/replay coverage of curved routes, stop-and-go ambiguity, and real outages remains part of Phase 8.
+- Phase 7A saved-company work remains the next essential implementation gate before Phase 8 begins.
 
 ### Phase 4 amendment — dual-band GNSS, mock rejection, and speed confidence
 

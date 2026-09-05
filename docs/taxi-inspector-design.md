@@ -8,14 +8,15 @@ The app is an independent estimate, not a certified taxi meter. GPS accuracy, th
 
 ## Primary flow
 
-1. The app opens to the taximeter and shows the most recently saved tariff. On a first run, when no tariff has been saved yet, it opens the **Tariff** screen instead, because the meter cannot bill without rates.
-2. The user opens **Tariff** — automatically on a first run, or from **Edit** beside the current tariff — and enters three monetary amounts:
+1. The app opens to the taximeter and shows the selected taxi company and its tariff. On a first run, when no company has been saved yet, it opens the **Taxi companies** flow instead, because the meter cannot bill without a selected tariff.
+2. The user can save up to ten taxi companies. Each has a user-entered name and three monetary amounts:
    - Initial tax — charged once when a ride begins.
    - Per km rate — charged for GPS distance travelled.
    - Per minute car-still rate — charged while speed is below the still threshold.
-3. The user taps **Start ride** and grants precise-location permission if needed.
-4. The meter updates the total, distance, and wait time once per second while GPS fixes arrive.
-5. The user can pause/resume, Stop & save the ride, or discard an active ride after confirmation. Reset is available only before a ride starts.
+3. Before starting, the user selects a saved company from the meter. Selecting its name selects all three associated tariff values together.
+4. The user taps **Start ride** and grants precise-location permission if needed.
+5. The meter updates the total, distance, and wait time once per second while GPS fixes arrive.
+6. The user can pause/resume, Stop & save the ride, or discard an active ride after confirmation. Reset is available only before a ride starts.
 
 ## Screen design
 
@@ -35,7 +36,8 @@ The main screen uses one focused, vintage taximeter panel rather than a dashboar
 │                                     │
 │     [ Pause ]  [ Stop & save ]      │
 │                                     │
-│  Current tariff              [Edit] │
+│  Selected company        [Change] │
+│  City Taxi                          │
 │  Initial 2.40 · 1.20/km · .35/min   │
 └─────────────────────────────────────┘
 ```
@@ -55,19 +57,21 @@ Input is trimmed and must contain digits with at most one decimal separator (`.`
 - **Status:** a plain-language GPS status (Searching, Weak, Good, Permission needed) is shown outside the meter so it is never mistaken for a fare reading.
 - **Controls:** large labelled buttons, with text as well as color, support use in a moving vehicle and accessibility.
 
-## Tariff editing
+## Taxi companies and tariff editing
 
-Tariff editing is a **separate screen**, not a panel inside the meter. It opens automatically on a first run, when no tariff has been saved, and is otherwise reached from the **Edit** control beside the current tariff on the meter. A **Save tariff** action accepts whole numbers or decimal values (with either `.` or `,` as the decimal separator), validates that all costs are non-negative, persists them locally, and returns to the meter.
+Company management and tariff editing use a **separate screen**, not entry fields inside the meter. The app retains no more than ten local company profiles. Each profile has a trimmed, nonblank user-provided company name of at most 80 characters and exactly one set of the three tariff values. Names are compared case-insensitively after trimming so duplicate picker entries are rejected. Company names are convenient labels supplied by the user; the app does not verify that they are official business identities.
 
-Keeping the meter free of entry fields means the fare reading is never competing with a keyboard, and the running meter cannot be mistaken for an editable form. On a first run the screen has no way to leave without saving a tariff: there is no implied default, and Start must never be reachable without rates. When an existing tariff is being edited, the screen offers **Cancel** and leaves the stored values untouched.
+The screen opens automatically on a first run with no saved companies and is otherwise reached from **Manage companies** beside the selected company on the meter. **Save company** accepts whole numbers or decimal tariff values (with either `.` or `,` as the decimal separator), validates that all costs are non-negative, and persists the name and full tariff together. The first saved company becomes selected. At the ten-company limit, Add is unavailable with a clear explanation; the app never silently deletes an existing company to make room.
 
-The current tariff remains visible beneath the meter, including while a ride runs; only its **Edit** control is withdrawn for the duration of the ride.
+Keeping entry fields off the meter means the fare reading never competes with a keyboard and a running meter cannot be mistaken for an editable form. On a first run there is no path to Start without saving a company. Existing companies may be edited or deleted only between rides. Deleting a company requires confirmation; deleting the selected company leaves no selection, so the user must explicitly select another before Start becomes available.
 
-Initial tax and rates may be changed only between rides. Starting a ride copies and locks the full tariff for that ride; the tariff editor is disabled until it ends. This makes every saved fare reproducible in its original tariff units, even though no currency is stored.
+Before a ride starts, an accessible selector on Meter lists the saved company names with enough tariff detail to distinguish them. Selecting a company durably selects its complete tariff. The selected company and tariff remain visible beneath the meter. Selection and company-management controls are disabled for every active phase, including Paused and Pending interrupted.
+
+Starting a ride atomically copies and locks both the selected company name and the full tariff. Later selection changes, edits, or deletion cannot alter the active ride or a saved ride. This makes every saved fare reproducible in its original tariff units and keeps the recorded label that the user selected, even though no currency or verified company identity is stored.
 
 ## Saved rides
 
-A **History** control opens a newest-first list of the 10 saved rides. Each row shows its end date/time, final total, distance, and status (**Completed** or **Interrupted**). Selecting a row shows the locked tariff, distance, wait time, elapsed ride time, total, status, and end timestamp. A user may delete an individual record from this detail screen after a confirmation; there is no route export or stored route.
+A **History** control opens a newest-first list of the 10 saved rides. Each row shows its end date/time, final total, distance, and status (**Completed** or **Interrupted**). Selecting a row shows the locked company name, locked tariff, distance, wait time, elapsed ride time, total, status, and end timestamp. A user may delete an individual record from this detail screen after a confirmation; there is no route export or stored route. Records created before company names existed show an explicit legacy/unavailable label rather than an invented company identity.
 
 Tapping **Stop & save** ends and immediately saves a ride as Completed. It is a primary action beside Pause while a ride runs. A user may stop immediately after starting; that saves the locked initial tax and zero distance/wait time as the actual recorded session.
 
@@ -95,11 +99,11 @@ total = initialTax
 Fare rules use elapsed-realtime timestamps, never wall-clock time. A one-second UI tick may refresh the screen, but it does not itself prove that the taxi moved or remained still.
 
 - A billable location sample is GPS-provider data with precise permission, a monotonic elapsed-realtime timestamp, an age of at most five seconds, and billing-quality accuracy. It must not be flagged as coming from a mock provider; this app's reading is meant to hold up as evidence, so a synthetic fix is refused and shown as **Weak**. The first-build billing-quality threshold is **20 m or better**. A 20–60 m GPS fix may update the visible status to **Weak**, but cannot change distance or waiting charges.
-- A billable segment is formed only by consecutive billable samples. It is rejected if its timestamps are not increasing, its gap exceeds 15 seconds, or it is implausible. Movement smaller than the larger of the segment's movement floor and either endpoint's reported accuracy is treated as GPS noise; the last billable baseline remains until a significant segment is received. That floor is **5 m**, or **2.5 m** when both endpoints were fixed with the help of L5-class signals (see Location handling).
+- A billable segment is formed only by consecutive billable samples. Its elapsed gap is measured from the latest accepted fix, even when the distance-noise baseline is older, and must be strictly less than 15 seconds. Timestamps that are not increasing, gaps of 15 seconds or more, and implausible segments are rejected. Movement smaller than the larger of the segment's movement floor and either endpoint's reported accuracy is treated as GPS noise; the last billable baseline remains until a significant segment is received. That floor is **5 m**, or **2.5 m** when both endpoints were fixed with the help of L5-class signals (see Location handling).
 - A reported speed is usable only while its source sample remains fresh and its own reported accuracy does not span a decision threshold: it is refused when 0.8 or 1.3 m/s falls inside one reported speed accuracy of it, and trusted otherwise. Android reports that accuracy at the 68th percentile; one such bound is deliberate, because a wider one would refuse far more speeds in exactly the weak reception where they are scarcest, and the five- and three-second hysteresis already absorbs the residual noise. Derived speed is usable only between two billable samples no more than five seconds apart. An absent, stale, or ambiguous speed cannot add wait time.
 - Five completed consecutive seconds at or below 0.8 m/s move the engine into Idle; the qualifying five seconds are not charged retroactively, and distance covered during them is ordinary billable distance. Billing begins with the next eligible elapsed interval. While Idle, three completed consecutive seconds at or above 1.3 m/s end Idle; waiting time remains billable during that exit-confirmation interval. Speeds between the thresholds retain the existing state.
 - No distance is billed while the engine is Idle, including throughout the exit-confirmation interval. The billable baseline still advances across an Idle period, so leaving Idle measures from a current point and never back-bills movement that was already charged as waiting.
-- Fifteen seconds after the last billable sample, the engine enters GPS Lost, freezes both fare components, clears movement/idle candidates, and treats the next billable sample as a new distance baseline. It never charges across the unobserved gap.
+- A Weak fix freezes billing immediately: it clears speed eligibility, movement/idle candidates, and the distance baseline, so neither later ticks nor a returning Good fix can charge across the uncertain interval. Fifteen seconds after the last billable sample, the engine enters GPS Lost, freezes both fare components, clears movement/idle candidates, and treats the next billable sample as a new distance baseline. Exactly 15 seconds belongs to GPS Lost, regardless of whether the tick or returning location callback is reduced first. It never charges across the unobserved gap.
 
 ## Location handling
 
@@ -109,7 +113,7 @@ To reduce false charges caused by GPS drift, the first release should:
 
 - Treat GPS fixes with accuracy worse than 60 m as unusable. Fixes between the 20 m billing threshold and 60 m are status-only; they never add fare distance or waiting time.
 - Apply the billable-segment noise rule in the timing contract; do not treat a small raw coordinate change as travel.
-- Ignore implausible jumps above 1,500 m, out-of-order fixes, and all segments separated by more than 15 seconds.
+- Ignore implausible jumps above 1,500 m, out-of-order fixes, and all segments separated by 15 seconds or more.
 - Sum distance only while the meter is running.
 - Request high-accuracy location from the phone’s **GPS provider** at **one update per second (1 Hz)** during a ride. This is responsive enough for the meter while avoiding the needless battery cost and GPS noise of faster polling. The app subscribes to no other provider: a network-provider position could never add fare distance or waiting time, so none is collected.
 - Prefer the reported GPS speed: it is Doppler-derived and better than anything the app can difference from two positions. Fall back to deriving speed from two valid, recent GPS fixes only when the reported speed is absent, or when its own accuracy leaves it ambiguous about the idle thresholds.
@@ -122,7 +126,7 @@ The app must state that underground parking, dense buildings, tunnels, and low-q
 
 ### Proposed accuracy improvement — bounded GPS-gap reconstruction
 
-This proposal is **not implemented and does not replace the current first-build contract** above. Today, a gap of up to 15 seconds may produce one straight-line segment between billable endpoints; once the engine enters GPS Lost, the returning fix starts a new baseline and the lost interval adds no fare. Phase 8 must compare that conservative result with a real taximeter before a reconstruction policy becomes billable product behaviour.
+This proposal is **not implemented and does not replace the current first-build contract** above. Today, a gap of less than 15 seconds may produce one straight-line segment between billable endpoints; at 15 seconds the engine enters GPS Lost, the returning fix starts a new baseline, and the lost interval adds no fare. Phase 8 must compare that conservative result with a real taximeter before a reconstruction policy becomes billable product behaviour.
 
 The objective of reconstruction would be to reduce the systematic under-reading caused by tunnels, underpasses, and urban-canyon outages while keeping every inferred contribution explicit and bounded. Linear interpolation cannot recreate the road taken: intermediate points on a straight line sum to the same endpoint chord. It can only distribute that chord over the gap so the fare engine can make one deterministic distance-versus-time decision.
 
@@ -151,7 +155,7 @@ The following decisions intentionally remain open until Phase 8 evidence exists:
 4. Whether reconstructed aggregates belong in the active snapshot and ride summary, which would require a Room migration and updated history disclosure.
 5. Whether the user-facing waiting/still tariff and `idleMillis` names must become a general time tariff and tariff-time duration for the selected reference mode.
 
-Any implementation must first correct and test the existing boundary semantics: Weak must freeze fare immediately, gap detection must use the latest accepted fix rather than an older noise baseline, and exactly 15 seconds must have one deterministic result regardless of ticker/location event order.
+The prerequisite boundary semantics are implemented and covered by pure-domain tests: Weak freezes fare immediately, gap detection uses the latest accepted fix rather than an older noise baseline, and exactly 15 seconds has one deterministic result regardless of ticker/location event order. These corrections do not authorize gap reconstruction; the open evidence requirements above still apply.
 
 ### Background tracking
 
@@ -184,25 +188,28 @@ If precise permission is revoked during a ride, the service immediately freezes 
 
 ## Data and privacy
 
-- Tariff values, the active-ride snapshot, and saved rides are stored only in the app's private on-device Room database. The database is the single persistent source of truth; no parallel preferences store is used.
+- Taxi-company names and tariffs, the selected-company id, the active-ride snapshot, and saved rides are stored only in the app's private on-device Room database. The database is the single persistent source of truth; no parallel preferences store is used.
 - The application does not require accounts, network access, advertising IDs, or a server.
 - Location is processed in memory for the active ride and is not saved as a route or shared.
-- Stopping or discarding the ride clears its in-memory location history. A saved ride retains only its final tariff, totals, duration, end status, and timestamp—not a route.
+- Stopping or discarding the ride clears its in-memory location history. A saved ride retains only its locked company-name label, final tariff, totals, duration, end status, and timestamp—not a route.
 - The app retains the **10 most recent saved rides**. When an eleventh is saved, it removes the oldest record. A completed or explicitly saved interrupted ride both count toward this limit.
+- The separate company list retains at most **10 saved companies**. Reaching that limit blocks another add until the user explicitly deletes one; it never trims companies automatically.
 
 ## Android implementation outline
 
 - **Minimum Android version:** Android 7.0 (API 24).
-- **Main screen:** one `MainActivity` hosting Compose destinations. Meter carries the meter face, ride controls, and the read-only tariff summary; Tariff is its own destination for entry and editing.
+- **Main screen:** one `MainActivity` hosting Compose destinations. Meter carries the meter face, ride controls, and a pre-ride selected-company control with a read-only tariff summary; company management and tariff entry remain separate from the meter.
 - **Meter renderer:** a custom Jetpack Compose drawing component renders the vintage face crisply across screen sizes while semantic Compose text and controls preserve accessibility.
 - **Active ride:** a foreground `Service` owns location updates and the fare engine, allowing tracking to continue with the app backgrounded or the screen locked. Its ongoing notification exposes the active state and a stop control.
 - **State:** a small fare engine owns distance, idle duration, explicit moving/idle state, running state, and decimal fare calculation; it is separated from UI code for straightforward unit tests.
-- **Persistence:** one small Room database retains the tariff, a lightweight active-ride snapshot, and the latest 10 saved ride summaries.
+- **Persistence:** one small Room database retains up to 10 named taxi-company tariffs, the selected company id, a lightweight active-ride snapshot with a locked company-name/tariff copy, and the latest 10 saved ride summaries.
 - **Location:** `LocationManager` supplies GPS-provider updates at a requested 1 Hz rate after the app verifies permission and that location services are enabled. A parallel `GnssStatus` subscription reports the carrier frequencies in use, so each fix can be marked single- or dual-band.
 
 ## Acceptance criteria for the first build
 
-- A first run opens the tariff screen, and the meter becomes reachable only once all three cost fields are saved. The user can save all three cost fields (as either whole or decimal values) and sees them after reopening the app; the meter shows totals with two decimal places and no currency label.
+- A first run opens company creation, and the meter becomes usable only once a named company and all three cost fields are saved. The first company becomes selected. The user can retain up to ten companies, select one before Start, and sees the selection after reopening the app; an eleventh add is rejected without eviction.
+- Starting copies the selected company name and all three tariff values together. Editing or deleting the source company later does not alter the active ride or its saved history, and deleting the selected company prevents Start until another is explicitly selected.
+- Version-1 migration preserves the prior singleton tariff, any active ride, and all saved summaries without destructive fallback; records without a real company name use an explicit legacy/unavailable label.
 - With location permission granted, Start/Pause/Resume/Stop & save/Discard ride work reliably; pre-ride Reset works reliably.
 - The displayed bill starts with the initial tax, grows with valid distance, and grows with valid still time.
 - An active ride continues to track when the app is backgrounded, with a persistent notification that makes this clear and can stop the ride.

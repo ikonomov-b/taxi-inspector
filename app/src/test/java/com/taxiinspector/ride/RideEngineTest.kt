@@ -58,6 +58,150 @@ class RideEngineTest {
     }
 
     @Test
+    fun `weak fix immediately freezes waiting and clears speed candidates`() {
+        var ride = RideEngine.start("ride-1", tariff, 0)
+        ride = accept(ride, elapsedMillis = 0, speed = 0.0)
+        repeat(5) { second ->
+            ride = RideEngine.reduce(ride, RideInput.Tick((second + 1) * 1_000L))
+        }
+        ride = accept(ride, elapsedMillis = 5_000, speed = 0.0)
+        ride = RideEngine.reduce(ride, RideInput.Tick(6_000))
+
+        assertEquals(MotionState.Idle, ride.motionState)
+        assertEquals(1_000, ride.idleMillis)
+
+        ride = RideEngine.reduce(
+            ride,
+            RideInput.LocationReceived(
+                sample = sample(elapsedMillis = 6_500, accuracyMeters = 25.0, speed = 0.0),
+                nowElapsedMillis = 6_500,
+            ),
+        )
+        ride = RideEngine.reduce(ride, RideInput.Tick(7_000))
+
+        assertEquals(TrackingStatus.Weak, ride.trackingStatus)
+        assertEquals(1_000, ride.idleMillis)
+        assertNull(ride.lastSpeedMetersPerSecond)
+        assertNull(ride.lastSpeedReceivedElapsedMillis)
+        assertEquals(0, ride.lowSpeedCandidateMillis)
+        assertEquals(0, ride.highSpeedCandidateMillis)
+    }
+
+    @Test
+    fun `good fix after weak fix starts a new distance baseline`() {
+        var ride = RideEngine.start("ride-1", tariff, 0)
+        ride = RideEngine.reduce(
+            ride,
+            RideInput.LocationReceived(movedSample(0.0, 0, speed = 10.0), 0),
+        )
+        ride = RideEngine.reduce(
+            ride,
+            RideInput.LocationReceived(
+                movedSample(10.0, 1_000, speed = 10.0).copy(accuracyMeters = 25.0),
+                1_000,
+            ),
+        )
+        ride = RideEngine.reduce(
+            ride,
+            RideInput.LocationReceived(movedSample(20.0, 2_000, speed = 10.0), 2_000),
+        )
+
+        assertEquals(TrackingStatus.Good, ride.trackingStatus)
+        assertEquals(0, BigDecimal.ZERO.compareTo(ride.distanceMeters))
+        assertEquals(2_000L, ride.lastBillablePoint?.fixElapsedMillis)
+    }
+
+    @Test
+    fun `continuous accepted fixes use the latest fix for gap detection while retaining noise baseline`() {
+        var ride = RideEngine.start("ride-1", tariff, 0)
+        ride = RideEngine.reduce(
+            ride,
+            RideInput.LocationReceived(movedSample(0.0, 0, speed = 0.0), 0),
+        )
+        for (second in 1..15) {
+            val driftMeters = if (second % 2 == 0) 2.0 else 0.0
+            val now = second * 1_000L
+            ride = RideEngine.reduce(
+                ride,
+                RideInput.LocationReceived(movedSample(driftMeters, now, speed = 0.0), now),
+            )
+        }
+
+        ride = RideEngine.reduce(
+            ride,
+            RideInput.LocationReceived(movedSample(6.0, 16_000, speed = 6.0), 16_000),
+        )
+
+        assertEquals(6.0, ride.distanceMeters.toDouble(), 0.1)
+        assertEquals(16_000L, ride.lastAcceptedFixElapsedMillis)
+        assertEquals(16_000L, ride.lastBillablePoint?.fixElapsedMillis)
+    }
+
+    @Test
+    fun `gap policy bills below fifteen seconds and freezes at and above it`() {
+        val expectedByGap = mapOf(
+            5_000L to true,
+            14_000L to true,
+            15_000L to false,
+            16_000L to false,
+            30_000L to false,
+            60_000L to false,
+            120_000L to false,
+        )
+
+        expectedByGap.forEach { (gapMillis, shouldBill) ->
+            var ride = RideEngine.start("ride-$gapMillis", tariff, 0)
+            ride = RideEngine.reduce(
+                ride,
+                RideInput.LocationReceived(movedSample(0.0, 0, speed = 10.0), 0),
+            )
+            ride = RideEngine.reduce(
+                ride,
+                RideInput.LocationReceived(
+                    movedSample(100.0, gapMillis, speed = 10.0),
+                    gapMillis,
+                ),
+            )
+
+            val billed = ride.distanceMeters.signum() > 0
+            assertEquals("gap=$gapMillis", shouldBill, billed)
+        }
+    }
+
+    @Test
+    fun `location and tick order agree at the fifteen second loss boundary`() {
+        val initial = RideEngine.reduce(
+            RideEngine.start("ride-1", tariff, 0),
+            RideInput.LocationReceived(movedSample(0.0, 0, speed = 0.0), 0),
+        ).copy(
+            motionState = MotionState.Idle,
+            lowSpeedCandidateMillis = 2_000,
+            highSpeedCandidateMillis = 1_000,
+        )
+        val returningFix = RideInput.LocationReceived(
+            movedSample(100.0, 15_000, speed = 10.0),
+            15_000,
+        )
+
+        val locationThenTick = RideEngine.reduce(
+            RideEngine.reduce(initial, returningFix),
+            RideInput.Tick(15_000),
+        )
+        val tickThenLocation = RideEngine.reduce(
+            RideEngine.reduce(initial, RideInput.Tick(15_000)),
+            returningFix,
+        )
+
+        assertEquals(tickThenLocation, locationThenTick)
+        assertEquals(TrackingStatus.Good, locationThenTick.trackingStatus)
+        assertEquals(MotionState.Moving, locationThenTick.motionState)
+        assertEquals(0, BigDecimal.ZERO.compareTo(locationThenTick.distanceMeters))
+        assertEquals(15_000L, locationThenTick.lastBillablePoint?.fixElapsedMillis)
+        assertEquals(0, locationThenTick.lowSpeedCandidateMillis)
+        assertEquals(0, locationThenTick.highSpeedCandidateMillis)
+    }
+
+    @Test
     fun `crawling below the idle threshold bills waiting time and no distance`() {
         var ride = drive(seconds = 60) { 0.7 }
 
