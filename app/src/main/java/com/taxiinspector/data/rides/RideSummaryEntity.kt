@@ -6,6 +6,7 @@ import androidx.room.PrimaryKey
 @Entity(tableName = "ride_summary")
 data class RideSummaryEntity(
     @PrimaryKey val id: String,
+    val companyName: String?,
     val initialTax: String,
     val perKmRate: String,
     val perMinuteStillRate: String,

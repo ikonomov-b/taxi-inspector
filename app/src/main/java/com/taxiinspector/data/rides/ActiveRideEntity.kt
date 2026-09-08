@@ -7,6 +7,7 @@ import androidx.room.PrimaryKey
 @Entity(tableName = "active_ride")
 data class ActiveRideEntity(
     @PrimaryKey val id: String,
+    val companyName: String?,
     val initialTax: String,
     val perKmRate: String,
     val perMinuteStillRate: String,

@@ -33,14 +33,14 @@ The safety priority is explainability: uncertain GPS data freezes billing rather
 | Application composition | `app/src/main/java/com/taxiinspector/TaxiInspectorApplication.kt` | Creates the explicit application container. |
 | Exact decimal units | `app/src/main/java/com/taxiinspector/core/decimal/DecimalAmount.kt` | Parse, preserve, and format currency-neutral tariff units. |
 | Clock boundary | `app/src/main/java/com/taxiinspector/core/time/` | Monotonic elapsed time for billing and UTC time for history. |
-| Pure fare/session domain | `app/src/main/java/com/taxiinspector/ride/` | Tariff, fare calculation, state models, GPS inputs, and `RideEngine`. Must stay Android-free. |
-| Local persistence | `app/src/main/java/com/taxiinspector/data/rides/` | Room entities, mappings, DAO, database, repository, and app container. |
+| Pure fare/session domain | `app/src/main/java/com/taxiinspector/ride/` | Tariff, `TaxiCompany` labels and their name-key rule, fare calculation, state models, GPS inputs, and `RideEngine`. Must stay Android-free. |
+| Local persistence | `app/src/main/java/com/taxiinspector/data/rides/` | Room entities, mappings, DAO, database, forward migrations, repository, and app container. |
 | GPS location adapter | `app/src/main/java/com/taxiinspector/data/location/` | Android-free `LocationClient` boundary, the `LocationManager.GPS_PROVIDER` adapter, and the `GnssStatus` carrier-frequency band classifier. |
 | Foreground tracking | `app/src/main/java/com/taxiinspector/tracking/` | Non-sticky service, serialized ride owner, commands, notifications, prerequisite checks, ownership binding, and recovery coordination. |
 | Application UI | `app/src/main/java/com/taxiinspector/ui/` | `TaxiInspectorApp`, navigation, theme, Meter, Tariff, History, and Ride Detail. UI state is immutable; History observes Room and deletion is confirmed, while Meter renders state and sends commands without owning a ride or reading location. |
 | Unit tests | `app/src/test/java/com/taxiinspector/` | JVM tests for decimal parsing, fare calculation, and core ride state. |
 | Android integration tests | `app/src/androidTest/java/com/taxiinspector/` | API 35 Room, GPS adapter, foreground service, notification action, recovery, and Compose/state-holder tests for Meter, Tariff, History, and Ride Detail. |
-| Room schema | `app/schemas/` | Versioned exported schema. Keep it updated with intentional schema changes. |
+| Room schema | `app/schemas/` | Versioned exported schemas, currently versions 1 and 2. Keep them updated with intentional schema changes, and add a migration test for every new version. |
 | Android resources | `app/src/main/res/` | Vintage palette, launcher/notification resources, and every user-facing string. Visual refinement remains Phase 9 work. |
 | Local dev/emulator scripts | `scripts/` | Boot/install/launch, CI-mirroring check, instrumented-test runner, and a black-box simulated-drive test; see `development-environment.md`. |
 

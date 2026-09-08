@@ -25,9 +25,11 @@ object RideEngine {
     private const val IDLE_ENTRY_SPEED = 0.8
     private const val MOVING_EXIT_SPEED = 1.3
 
-    fun start(id: String, tariff: Tariff, nowElapsedMillis: Long): ActiveRide = ActiveRide(
+    /** Locks the company's name and exact tariff together, so neither can be taken from elsewhere. */
+    fun start(id: String, company: TaxiCompany, nowElapsedMillis: Long): ActiveRide = ActiveRide(
         id = id,
-        tariff = tariff,
+        companyName = company.name,
+        tariff = company.tariff,
         phase = RidePhase.Running,
         trackingStatus = TrackingStatus.Searching,
         distanceMeters = BigDecimal.ZERO,
@@ -57,6 +59,7 @@ object RideEngine {
         require(endedElapsedMillis >= ride.startedElapsedMillis) { "End cannot precede start." }
         return RideSummary(
             id = ride.id,
+            companyName = ride.companyName,
             tariff = ride.tariff,
             total = FareCalculator.total(ride.tariff, ride.distanceMeters, ride.idleMillis),
             distanceMeters = ride.distanceMeters,

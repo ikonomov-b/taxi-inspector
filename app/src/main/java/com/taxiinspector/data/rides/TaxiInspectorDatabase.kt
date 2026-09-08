@@ -4,8 +4,13 @@ import androidx.room.Database
 import androidx.room.RoomDatabase
 
 @Database(
-    entities = [AppSettingsEntity::class, ActiveRideEntity::class, RideSummaryEntity::class],
-    version = 1,
+    entities = [
+        TaxiCompanyEntity::class,
+        AppSettingsEntity::class,
+        ActiveRideEntity::class,
+        RideSummaryEntity::class,
+    ],
+    version = 2,
     exportSchema = true,
 )
 abstract class TaxiInspectorDatabase : RoomDatabase() {

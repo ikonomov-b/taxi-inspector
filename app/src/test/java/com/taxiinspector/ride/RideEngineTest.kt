@@ -12,10 +12,11 @@ class RideEngineTest {
         perKmRate = DecimalAmount.parse("1.20")!!,
         perMinuteStillRate = DecimalAmount.parse("0.35")!!,
     )
+    private val company = TaxiCompany(id = "company-1", name = "Test Taxi", tariff = tariff)
 
     @Test
     fun `wait billing starts after five qualifying seconds without back billing`() {
-        var ride = RideEngine.start("ride-1", tariff, 0)
+        var ride = RideEngine.start("ride-1", company, 0)
         ride = accept(ride, elapsedMillis = 0, speed = 0.8)
 
         repeat(5) { second ->
@@ -33,7 +34,7 @@ class RideEngineTest {
 
     @Test
     fun `gps timeout freezes fare and removes baseline`() {
-        var ride = RideEngine.start("ride-1", tariff, 0)
+        var ride = RideEngine.start("ride-1", company, 0)
         ride = accept(ride, elapsedMillis = 0, speed = 0.0)
         ride = RideEngine.reduce(ride, RideInput.GpsTimedOut(15_000))
 
@@ -44,7 +45,7 @@ class RideEngineTest {
 
     @Test
     fun `weak fixes never become a billable baseline`() {
-        var ride = RideEngine.start("ride-1", tariff, 0)
+        var ride = RideEngine.start("ride-1", company, 0)
         ride = RideEngine.reduce(
             ride,
             RideInput.LocationReceived(
@@ -59,7 +60,7 @@ class RideEngineTest {
 
     @Test
     fun `weak fix immediately freezes waiting and clears speed candidates`() {
-        var ride = RideEngine.start("ride-1", tariff, 0)
+        var ride = RideEngine.start("ride-1", company, 0)
         ride = accept(ride, elapsedMillis = 0, speed = 0.0)
         repeat(5) { second ->
             ride = RideEngine.reduce(ride, RideInput.Tick((second + 1) * 1_000L))
@@ -89,7 +90,7 @@ class RideEngineTest {
 
     @Test
     fun `good fix after weak fix starts a new distance baseline`() {
-        var ride = RideEngine.start("ride-1", tariff, 0)
+        var ride = RideEngine.start("ride-1", company, 0)
         ride = RideEngine.reduce(
             ride,
             RideInput.LocationReceived(movedSample(0.0, 0, speed = 10.0), 0),
@@ -113,7 +114,7 @@ class RideEngineTest {
 
     @Test
     fun `continuous accepted fixes use the latest fix for gap detection while retaining noise baseline`() {
-        var ride = RideEngine.start("ride-1", tariff, 0)
+        var ride = RideEngine.start("ride-1", company, 0)
         ride = RideEngine.reduce(
             ride,
             RideInput.LocationReceived(movedSample(0.0, 0, speed = 0.0), 0),
@@ -150,7 +151,7 @@ class RideEngineTest {
         )
 
         expectedByGap.forEach { (gapMillis, shouldBill) ->
-            var ride = RideEngine.start("ride-$gapMillis", tariff, 0)
+            var ride = RideEngine.start("ride-$gapMillis", company, 0)
             ride = RideEngine.reduce(
                 ride,
                 RideInput.LocationReceived(movedSample(0.0, 0, speed = 10.0), 0),
@@ -171,7 +172,7 @@ class RideEngineTest {
     @Test
     fun `location and tick order agree at the fifteen second loss boundary`() {
         val initial = RideEngine.reduce(
-            RideEngine.start("ride-1", tariff, 0),
+            RideEngine.start("ride-1", company, 0),
             RideInput.LocationReceived(movedSample(0.0, 0, speed = 0.0), 0),
         ).copy(
             motionState = MotionState.Idle,
@@ -233,7 +234,7 @@ class RideEngineTest {
     fun `leaving idle bills the exit interval as waiting and never back bills its distance`() {
         // Stopped for 10 s, then away at 6 m/s: the three-second exit confirmation is
         // billed as waiting, and the distance covered during it is not charged.
-        var ride = RideEngine.start("ride-1", tariff, 0)
+        var ride = RideEngine.start("ride-1", company, 0)
         var travelled = 0.0
         var distanceAtExit = BigDecimal.ZERO
         for (second in 0 until 30) {
@@ -265,7 +266,7 @@ class RideEngineTest {
     fun `distance covered while crawling is not billed when the ride leaves idle`() {
         // Pulling away at 2 m/s keeps each one-second segment under the five-metre
         // significance threshold, so the baseline only stays current if Idle advances it.
-        var ride = RideEngine.start("ride-1", tariff, 0)
+        var ride = RideEngine.start("ride-1", company, 0)
         var travelled = 0.0
         var positionAtExit: Double? = null
         var lastFixPosition = 0.0
@@ -290,7 +291,7 @@ class RideEngineTest {
 
     @Test
     fun `a mock fix never becomes a billable baseline`() {
-        var ride = RideEngine.start("ride-1", tariff, 0)
+        var ride = RideEngine.start("ride-1", company, 0)
         ride = RideEngine.reduce(
             ride,
             RideInput.LocationReceived(
@@ -307,7 +308,7 @@ class RideEngineTest {
     @Test
     fun `a dual band segment bills movement a single band segment discards as noise`() {
         fun distanceAfterThreeMetreStep(band: LocationSample.Band): Double {
-            var ride = RideEngine.start("ride-1", tariff, 0)
+            var ride = RideEngine.start("ride-1", company, 0)
             ride = RideEngine.reduce(
                 ride,
                 RideInput.LocationReceived(bandedSample(0.0, 0, speed = 3.0, band = band), 0),
@@ -328,7 +329,7 @@ class RideEngineTest {
     fun `a reported speed too coarse to resolve the hysteresis band is replaced by derived speed`() {
         // The vehicle really covers 5 m per second while the provider insists it is stopped.
         fun motionAfterEightSeconds(speedAccuracy: Double): MotionState {
-            var ride = RideEngine.start("ride-1", tariff, 0)
+            var ride = RideEngine.start("ride-1", company, 0)
             var travelled = 0.0
             for (second in 0 until 8) {
                 val now = second * 1_000L
@@ -361,7 +362,7 @@ class RideEngineTest {
     fun `a fast speed stays trusted however loose its reported accuracy`() {
         // The coordinates never move, so a discarded speed would derive 0 m/s from the fixes
         // and drop the engine into Idle within five seconds.
-        var ride = RideEngine.start("ride-1", tariff, 0)
+        var ride = RideEngine.start("ride-1", company, 0)
         for (second in 0 until 8) {
             val now = second * 1_000L
             ride = RideEngine.reduce(
@@ -404,7 +405,7 @@ class RideEngineTest {
 
     /** Drives one 1 Hz fix and one tick per second at the given speed profile. */
     private fun drive(seconds: Int, speedAt: (Int) -> Double): ActiveRide {
-        var ride = RideEngine.start("ride-1", tariff, 0)
+        var ride = RideEngine.start("ride-1", company, 0)
         var travelled = 0.0
         for (second in 0 until seconds) {
             val now = second * 1_000L

@@ -5,13 +5,42 @@ import androidx.room.Insert
 import androidx.room.OnConflictStrategy
 import androidx.room.Query
 import androidx.room.Transaction
+import androidx.room.Update
 import com.taxiinspector.ride.RideEngine
 import com.taxiinspector.ride.RidePhase
+import com.taxiinspector.ride.Tariff
+import com.taxiinspector.ride.TaxiCompany
 import com.taxiinspector.ride.TrackingStatus
 import kotlinx.coroutines.flow.Flow
 
 @Dao
 abstract class RideDao {
+    @Query("SELECT * FROM taxi_company ORDER BY nameKey ASC")
+    abstract fun observeCompanies(): Flow<List<TaxiCompanyEntity>>
+
+    @Query("SELECT * FROM taxi_company WHERE id = :id")
+    abstract suspend fun company(id: String): TaxiCompanyEntity?
+
+    /**
+     * One query is safe here because a one-shot read needs no invalidation tracking; the
+     * observable form is composed from the two single-table flows instead.
+     */
+    @Query(
+        "SELECT * FROM taxi_company WHERE id = " +
+            "(SELECT selectedCompanyId FROM app_settings WHERE id = 1)",
+    )
+    abstract suspend fun selectedCompany(): TaxiCompanyEntity?
+
+    /**
+     * Deliberately aborts rather than replaces: a duplicate `nameKey` belongs to a different
+     * company, and REPLACE would silently evict it, which the ten-company rule forbids.
+     */
+    @Insert(onConflict = OnConflictStrategy.ABORT)
+    abstract suspend fun insertCompany(company: TaxiCompanyEntity)
+
+    @Update
+    abstract suspend fun updateCompany(company: TaxiCompanyEntity)
+
     @Query("SELECT * FROM app_settings WHERE id = 1")
     abstract fun observeSettings(): Flow<AppSettingsEntity?>
 
@@ -70,11 +99,39 @@ abstract class RideDao {
         trimHistoryToTen()
     }
 
+    /**
+     * Interim bridge for the single-tariff editor that Phase 7A.4 replaces with the company
+     * editor: it retariffs the selected company, or creates the placeholder company when the
+     * database holds no selection yet.
+     */
+    @Transaction
+    open suspend fun saveSelectedCompanyTariff(tariff: Tariff) {
+        val existing = selectedCompany() ?: company(TaxiCompanyEntity.MIGRATED_TARIFF_ID)
+        val company = if (existing == null) {
+            TaxiCompany(
+                id = TaxiCompanyEntity.MIGRATED_TARIFF_ID,
+                name = TaxiCompanyEntity.MIGRATED_TARIFF_NAME,
+                tariff = tariff,
+            ).toEntity().also { insertCompany(it) }
+        } else {
+            existing.copy(
+                initialTax = tariff.initialTax.value.toPlainString(),
+                perKmRate = tariff.perKmRate.value.toPlainString(),
+                perMinuteStillRate = tariff.perMinuteStillRate.value.toPlainString(),
+            ).also { updateCompany(it) }
+        }
+
+        upsertSettings(AppSettingsEntity(selectedCompanyId = company.id))
+    }
+
+    /** Resolves the selection and locks its name and exact tariff together, or creates nothing. */
     @Transaction
     open suspend fun startRide(id: String, nowElapsedMillis: Long): ActiveRideEntity {
         check(activeRide() == null) { "A ride is already active." }
-        val tariff = checkNotNull(settings()) { "Save a tariff before starting a ride." }.toDomainTariff()
-        val activeRide = RideEngine.start(id, tariff, nowElapsedMillis).toEntity()
+        val company = checkNotNull(selectedCompany()) {
+            "Select a saved taxi company before starting a ride."
+        }
+        val activeRide = RideEngine.start(id, company.toDomain(), nowElapsedMillis).toEntity()
         upsertActiveRide(activeRide)
         return activeRide
     }

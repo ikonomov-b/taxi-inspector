@@ -3,8 +3,10 @@ package com.taxiinspector.ride
 import com.taxiinspector.core.decimal.DecimalAmount
 import java.math.BigDecimal
 
+/** [companyName] is the label locked at Start; null marks a ride saved before companies existed. */
 data class RideSummary(
     val id: String,
+    val companyName: String?,
     val tariff: Tariff,
     val total: DecimalAmount,
     val distanceMeters: BigDecimal,
