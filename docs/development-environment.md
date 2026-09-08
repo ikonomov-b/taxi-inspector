@@ -65,10 +65,35 @@ The Android-free fare-core sources and JUnit tests compile and run successfully 
     ```
 
     Measured on a Pixel 8 Pro (Android 17): 17 failures on Espresso 3.5.0, two or three flaky ones on 3.7.0 without the device preparation, and none with both. Restore the animation scales to `1.0` and `svc power stayon false` afterwards if it is a phone in daily use.
-- `scripts/simulate-drive.sh` — a black-box ~2 minute simulated ride: installs a clean app copy, seeds a tariff, taps "Start ride" through `uiautomator`, feeds a deterministic GPS path (60s at a constant 50 km/h, then 60s stationary) into the emulator's real GPS provider via `adb emu geo fix` (`scripts/drive_profile.py`), taps "Stop & save", then has `scripts/check_ride_result.py` compare the distanceMeters/idleMillis/fare the app actually persisted (`ride_summary`) against what RideEngine's own rules (`app/src/main/java/com/taxiinspector/ride/RideEngine.kt`) predict for that exact profile, failing loudly on a mismatch. It drives only the real UI and the real GPS provider — never the app's Kotlin code — so it exercises the full on-device stack.
+- `scripts/simulate-drive.sh` — a black-box ~2 minute simulated ride: installs a clean app copy, types a tariff into the app's own tariff screen, taps "Start ride" through `uiautomator`, feeds a deterministic GPS path (60s at a constant 50 km/h, then 60s stationary) into the emulator's real GPS provider via `adb emu geo fix` (`scripts/drive_profile.py`), taps "Stop & save", then has `scripts/check_ride_result.py` compare the distanceMeters/idleMillis/fare the app actually persisted (`ride_summary`) against what RideEngine's own rules (`app/src/main/java/com/taxiinspector/ride/RideEngine.kt`) predict for that exact profile, failing loudly on a mismatch. It drives only the real UI and the real GPS provider — never the app's Kotlin code — so it exercises the full on-device stack.
   - **`geo fix` needs an explicit velocity, in knots, as its 5th argument** (`help geo fix` on the emulator console) — without one the emulator reports a native GPS speed of exactly 0 on every fix, and `AndroidGpsLocationClient` prefers that over its own derived speed, so the engine calls itself Idle within 5s regardless of real movement. `drive_profile.py` always passes altitude/satellites/velocity now; this bit an earlier version of the script silently — every distance/idle number it ever produced was meaningless — until diagnosed by polling `active_ride` and `dumpsys location` mid-ride.
   - The expected distance nets out the first fix's baseline-only cost (`RideEngine.onLocation`'s `lastBillablePoint == null` branch bills 0) but still tolerates ~40m of slack: the GPS provider typically takes an extra fix or two to deliver its first callback after Start, silently absorbing another step of distance the same way a real receiver's acquisition time would. The expected idle time is derived from the actual wall-clock duration of the stationary leg (recorded by `drive_profile.py`) plus this script's own "Stop & save" tap latency, not the nominal 60s, since ticks run on the controller's own 1Hz timer independent of the GPS feed.
-  - `scripts/ui_dump.py` is the `uiautomator`-dump-and-tap helper this and `check_ride_result.py` share with the tariff-entry-by-UI path (currently unused for tariff entry — see caveat below).
-  - **Caveat (remove once switched back):** this script still seeds the `app_settings` row directly into the Room database (`taxi-inspector.db`, schema in `app/schemas/com.taxiinspector.data.rides.TaxiInspectorDatabase/1.json`) via `adb root` + on-device `sqlite3`, bypassing the tariff screen. That shortcut dates from when Save tariff was unwired; it now persists through `TariffViewModel.save()` and `repository.saveTariff()`, so the script can be switched back to `ui_dump.py`'s `fill`/`tap-text "Save tariff"` calls (kept in that file, just unused). The DB shortcut is emulator-only in any case -- it needs `adb root`, which a production device will not give, so a physical-device run must enter the tariff through the screen.
+  - `scripts/ui_dump.py` is the `uiautomator`-dump-and-tap helper this and `check_ride_result.py` share; `fill` handles the three tariff fields and `tap-text` handles every button.
+  - The tariff is typed through the screen rather than seeded into Room. The old shortcut inserted an `app_settings` row directly, which stopped being possible when the tariff moved to its taxi company: a direct insert would now have to fabricate a company row and a selection. The script still calls `adb root`, but only so `check_ride_result.py` can read the saved summary out of the app's private database at the end, and it does so before any UI automation because a mid-run adbd restart would break the taps.
 
 These scripts drive the same shared `taxi-inspector-api35` AVD as any manual instrumentation run, so the single-user-at-a-time caveat above applies to them too.
+
+## Checking a database upgrade end to end
+
+`MigrationTestHelper` proves a migration's SQL against a synthetic fixture; it does not prove that the shipped app upgrades an installed one. To check that, build the previous APK from a worktree and install the new one over it:
+
+```bash
+git worktree add /tmp/pre-migration <commit before the schema change>
+cp local.properties /tmp/pre-migration/
+(cd /tmp/pre-migration && ./gradlew --no-daemon assembleDebug)
+adb uninstall com.taxiinspector                                   # start from no data
+adb install /tmp/pre-migration/app/build/outputs/apk/debug/app-debug.apk
+# drive the old app through its own UI (scripts/ui_dump.py) so it writes real rows
+./gradlew --no-daemon assembleDebug
+adb install -r app/build/outputs/apk/debug/app-debug.apk           # -r keeps the data
+```
+
+Then read the upgraded database back. `run-as` needs no root, so this works on a physical device too:
+
+```bash
+db=/data/data/com.taxiinspector/databases/taxi-inspector.db
+adb shell "run-as com.taxiinspector sqlite3 $db 'pragma user_version'"
+adb shell "run-as com.taxiinspector sqlite3 $db 'select * from taxi_company'"
+```
+
+Note that `adb install -r` kills the process, so a ride left Running comes back as `PendingInterrupted`. That is the recovery path working, not migration damage. Remember to `git worktree remove --force` the checkout afterwards.

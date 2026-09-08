@@ -33,32 +33,25 @@ if [[ "$sdk_version" -ge 33 ]]; then
   "$ADB" -s "$serial" shell pm grant "$APP_ID" android.permission.POST_NOTIFICATIONS
 fi
 
-echo "Launching the app once to let Room create its database..."
+# Restarted as root here, before any UI automation, only so
+# check_ride_result.py can read the saved summary back out of the app's
+# private database at the end; adbd restarting mid-run would break the taps.
+"$ADB" root >/dev/null
+sleep 1
+
+echo "Launching the app; a clean install opens on the tariff screen..."
 "$ADB" -s "$serial" shell am start -n "$APP_ID/$MAIN_ACTIVITY"
 sleep 2
 
-# The in-app tariff-entry screen is mid-refactor and its Save button isn't
-# wired up yet, so seed the same row it would write (app_settings, per
-# app/schemas/com.taxiinspector.data.rides.TaxiInspectorDatabase/1.json)
-# directly into the Room database instead of blocking on that UI.
-echo "Seeding a tariff directly into the Room database..."
-"$ADB" root >/dev/null
-sleep 1
-"$ADB" -s "$serial" shell am force-stop "$APP_ID"
-db_path="/data/data/$APP_ID/databases/taxi-inspector.db"
-seed_sql="$(mktemp)"
-cat > "$seed_sql" <<'SQL'
-PRAGMA wal_checkpoint(TRUNCATE);
-INSERT OR REPLACE INTO app_settings (id, initialTax, perKmRate, perMinuteStillRate)
-VALUES (1, '1.50', '0.80', '0.20');
-SQL
-"$ADB" -s "$serial" push "$seed_sql" /data/local/tmp/seed_tariff.sql >/dev/null
-"$ADB" -s "$serial" shell "sqlite3 $db_path < /data/local/tmp/seed_tariff.sql"
-"$ADB" -s "$serial" shell rm -f /data/local/tmp/seed_tariff.sql
-rm -f "$seed_sql"
-
-echo "Relaunching the app with the seeded tariff..."
-"$ADB" -s "$serial" shell am start -n "$APP_ID/$MAIN_ACTIVITY"
+# Typed into the real tariff screen rather than seeded into Room. The tariff
+# now belongs to a saved taxi company instead of the app_settings row, so a
+# direct insert would have to fabricate a company and a selection; typing it
+# exercises the same path a user takes and works without root on a phone.
+echo "Entering a tariff through the app's own tariff screen..."
+python3 "$SCRIPT_DIR/ui_dump.py" --serial "$serial" fill "Initial tax" "1.50"
+python3 "$SCRIPT_DIR/ui_dump.py" --serial "$serial" fill "Per km rate" "0.80"
+python3 "$SCRIPT_DIR/ui_dump.py" --serial "$serial" fill "Per minute car-still rate" "0.20"
+python3 "$SCRIPT_DIR/ui_dump.py" --serial "$serial" tap-text "Save tariff"
 sleep 2
 
 echo "Starting the ride..."
