@@ -4,6 +4,7 @@ import android.content.Context
 import androidx.room.Room
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
+import com.taxiinspector.ui.TariffSummary
 import com.taxiinspector.core.decimal.DecimalAmount
 import com.taxiinspector.data.rides.RoomRideRepository
 import com.taxiinspector.data.rides.TaxiInspectorDatabase

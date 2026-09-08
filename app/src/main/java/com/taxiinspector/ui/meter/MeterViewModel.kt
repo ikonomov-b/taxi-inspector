@@ -9,12 +9,13 @@ import com.taxiinspector.data.rides.RoomRideRepository
 import com.taxiinspector.ride.ActiveRide
 import com.taxiinspector.ride.FareCalculator
 import com.taxiinspector.ride.RidePhase
-import com.taxiinspector.ride.Tariff
+import com.taxiinspector.ride.TaxiCompany
 import com.taxiinspector.ride.TrackingStatus
 import com.taxiinspector.tracking.RideCommand
 import com.taxiinspector.tracking.RideOwnership
 import com.taxiinspector.tracking.RideRecoveryCoordinator
-import com.taxiinspector.ui.tariff.toSummary
+import com.taxiinspector.ui.companies.toSummary
+import com.taxiinspector.ui.toSummary
 import java.math.BigDecimal
 import java.math.RoundingMode
 import java.text.DecimalFormatSymbols
@@ -47,11 +48,12 @@ class MeterViewModel(
     val effects: Flow<MeterEffect> = effectChannel.receiveAsFlow()
 
     val state: StateFlow<MeterUiState> = combine(
-        repository.observeTariff(),
+        repository.observeSelectedCompany(),
+        repository.observeCompanies(),
         repository.observeActiveRide(),
         localState,
-    ) { tariff, ride, local ->
-        buildState(tariff, ride, local)
+    ) { selected, companies, ride, local ->
+        buildState(selected, companies, ride, local)
     }.stateIn(viewModelScope, SharingStarted.Eagerly, MeterUiState())
 
     /** Start or Resume was issued from this screen, so a live service already owns the ride. */
@@ -63,14 +65,14 @@ class MeterViewModel(
     /**
      * Durable state is mirrored here as well as in [state] so that an action reads the
      * value the user is looking at: the derived state flow may not have recomposed yet
-     * when a fast typist taps Save tariff.
+     * when a fast tap follows a selection change.
      */
-    private var savedTariff: Tariff? = null
+    private var selectedCompany: TaxiCompany? = null
     private var activeRide: ActiveRide? = null
 
     init {
         viewModelScope.launch {
-            repository.observeTariff().collect { savedTariff = it }
+            repository.observeSelectedCompany().collect { selectedCompany = it }
         }
         viewModelScope.launch {
             repository.observeActiveRide().collect { ride ->
@@ -82,8 +84,13 @@ class MeterViewModel(
 
     fun onAction(action: MeterAction) {
         when (action) {
-            MeterAction.EditTariff -> Unit // The route navigates; nothing here changes.
+            MeterAction.ManageCompanies -> Unit // The route navigates; nothing here changes.
             MeterAction.ViewHistory -> Unit // The route navigates; nothing here changes.
+            MeterAction.CompanySelectorOpened ->
+                localState.update { it.copy(isCompanySelectorVisible = true) }
+            MeterAction.CompanySelectorDismissed ->
+                localState.update { it.copy(isCompanySelectorVisible = false) }
+            is MeterAction.CompanySelected -> selectCompany(action.id)
             MeterAction.Reset -> reset()
             MeterAction.StartRide -> requestLaunch(RideCommand.Start)
             MeterAction.ResumeRide -> requestLaunch(RideCommand.Resume)
@@ -124,9 +131,9 @@ class MeterViewModel(
         val command = pendingLaunch ?: return
         val environment = localState.value.environment
         when {
-            command == RideCommand.Start && savedTariff == null -> {
+            command == RideCommand.Start && selectedCompany == null -> {
                 pendingLaunch = null
-                localState.update { it.copy(message = MeterMessage.TariffNeededToStart) }
+                localState.update { it.copy(message = MeterMessage.CompanyNeededToStart) }
             }
             !environment.hasPreciseLocationPermission ->
                 requestPermission(MeterEffect.RequestPreciseLocationPermission)
@@ -219,17 +226,31 @@ class MeterViewModel(
         effectChannel.trySend(effect)
     }
 
+    /** The selection is durable, so it is changed here rather than held as screen state. */
+    private fun selectCompany(id: String) {
+        localState.update { it.copy(isCompanySelectorVisible = false) }
+        viewModelScope.launch { repository.selectCompany(id) }
+    }
+
     private fun buildState(
-        tariff: Tariff?,
+        selected: TaxiCompany?,
+        companies: List<TaxiCompany>,
         ride: ActiveRide?,
         local: LocalState,
     ): MeterUiState {
         return MeterUiState(
             presentation = presentationOf(ride),
-            savedTariff = tariff?.toSummary(),
-            status = statusOf(tariff, ride, local.environment),
-            canStart = tariff != null && ride == null,
-            canEditTariff = ride == null,
+            company = when {
+                ride != null -> MeterCompany(ride.companyName, ride.tariff.toSummary())
+                selected != null -> MeterCompany(selected.name, selected.tariff.toSummary())
+                else -> null
+            },
+            companies = if (ride == null) companies.map(TaxiCompany::toSummary) else emptyList(),
+            selectedCompanyId = selected?.id?.takeIf { ride == null },
+            status = statusOf(selected, ride, local.environment),
+            canStart = selected != null && ride == null,
+            canManageCompanies = ride == null,
+            isCompanySelectorVisible = local.isCompanySelectorVisible && ride == null,
             isDiscardConfirmationVisible = local.isDiscardConfirmationVisible && ride != null,
             recovery = local.recovery,
             message = local.message,
@@ -255,12 +276,12 @@ class MeterViewModel(
     }
 
     private fun statusOf(
-        tariff: Tariff?,
+        selected: TaxiCompany?,
         ride: ActiveRide?,
         environment: MeterEnvironment,
     ): MeterStatus = when {
         ride == null -> when {
-            tariff == null -> MeterStatus.TariffNeeded
+            selected == null -> MeterStatus.CompanyNeeded
             !environment.hasPreciseLocationPermission -> MeterStatus.PermissionNeeded
             !environment.isGpsProviderEnabled -> MeterStatus.GpsDisabled
             !environment.hasNotificationPermission -> MeterStatus.NotificationsNeeded
@@ -281,6 +302,7 @@ class MeterViewModel(
         val environment: MeterEnvironment = MeterEnvironment(),
         val recovery: MeterRecovery? = null,
         val message: MeterMessage? = null,
+        val isCompanySelectorVisible: Boolean = false,
         val isDiscardConfirmationVisible: Boolean = false,
     )
 

@@ -117,8 +117,8 @@ internal class RideTrackingController(
             rejectAndStop(StartRejection.ActiveRideExists)
             return
         }
-        if (repository.currentTariff() == null) {
-            rejectAndStop(StartRejection.TariffMissing)
+        if (repository.selectedCompany() == null) {
+            rejectAndStop(StartRejection.SelectedCompanyMissing)
             return
         }
 

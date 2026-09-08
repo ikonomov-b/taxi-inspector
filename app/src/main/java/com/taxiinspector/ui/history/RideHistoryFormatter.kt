@@ -32,6 +32,7 @@ internal class RideHistoryFormatter(
     fun detail(saved: SavedRideSummary): RideDetailPresentation = with(saved.summary) {
         RideDetailPresentation(
             id = id,
+            companyName = companyName,
             endedAt = formatTimestamp(saved.endedAtUtcMillis),
             total = total.formatTotal(locale),
             distanceKilometres = formatKilometres(distanceMeters),

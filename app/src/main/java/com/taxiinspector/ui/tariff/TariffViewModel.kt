@@ -9,6 +9,7 @@ import com.taxiinspector.core.decimal.DecimalAmount
 import com.taxiinspector.data.rides.RoomRideRepository
 import com.taxiinspector.ride.ActiveRide
 import com.taxiinspector.ride.Tariff
+import com.taxiinspector.ui.toSummary
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -21,8 +22,12 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 
 /**
- * Validates and persists the editable tariff. Amounts stay exact decimals in one
- * user-chosen unit: no currency code, symbol, or conversion exists anywhere here.
+ * Validates and persists one anonymous tariff, with no company name attached.
+ *
+ * This is the parked single-tariff variant of the product: it is deliberately kept building
+ * and tested but is not wired into navigation, which uses the company flow in
+ * `ui/companies/`. Its storage path is [RoomRideRepository.saveTariff]. Amounts stay exact
+ * decimals in one user-chosen unit: no currency code, symbol, or conversion exists here.
  */
 class TariffViewModel(private val repository: RoomRideRepository) : ViewModel() {
     private val formState = MutableStateFlow(TariffFormState())
@@ -112,12 +117,6 @@ class TariffViewModel(private val repository: RoomRideRepository) : ViewModel() 
         }
     }
 }
-
-internal fun Tariff.toSummary(): TariffSummary = TariffSummary(
-    initialTax = initialTax.formatConfigured(),
-    perKmRate = perKmRate.formatConfigured(),
-    perMinuteStillRate = perMinuteStillRate.formatConfigured(),
-)
 
 private fun pristineFormOf(tariff: Tariff?): TariffFormState = TariffFormState(
     initialTax = tariff?.initialTax?.formatConfigured().orEmpty(),

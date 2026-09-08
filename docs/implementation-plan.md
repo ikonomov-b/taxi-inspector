@@ -336,7 +336,7 @@ This approved amendment must be complete before Phase 8 so accessibility, adapti
 
 ### Step 7A.4: Add company management and pre-ride selection UI
 
-- Evolve the Tariff destination into a company-list and company-editor flow while reusing the existing exact-decimal validation and separate-screen keyboard boundary.
+- Add a company-list and company-editor flow reusing the existing exact-decimal validation and separate-screen keyboard boundary. The Tariff destination was not converted in place: it is retained, unwired, as the parked anonymous single-tariff variant recorded in `project-memory.md`, and the company flow lives beside it in `ui/companies/`.
 - On first run with no companies, open the create-company flow and provide no path to Start until a valid company is saved.
 - Show an accessible company selector directly on Meter before Start. Each option shows its name and enough tariff detail to distinguish it; changing it durably selects the whole profile.
 - Show the locked company name and tariff while a ride is active, with selection and management controls disabled.

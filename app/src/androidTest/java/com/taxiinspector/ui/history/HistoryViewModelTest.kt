@@ -94,7 +94,7 @@ class HistoryViewModelTest {
     @Test
     fun retryingAnInterruptedSaveStillProducesOneVisibleRow() = runBlocking {
         val rideTariff = tariff("1", "2", "3")
-        repository.saveTariff(rideTariff)
+        useCompany(rideTariff)
         val active = repository.startRide("interrupted", 1_000)
         val summary = RideEngine.finish(active, 5_000)
 
@@ -115,7 +115,7 @@ class HistoryViewModelTest {
         idleMillis: Long = 0,
         elapsedMillis: Long = 1_000,
     ) {
-        repository.saveTariff(tariff)
+        useCompany(tariff)
         val active = repository.startRide(id, 1_000).copy(
             distanceMeters = BigDecimal(distanceMeters),
             idleMillis = idleMillis,
@@ -137,6 +137,19 @@ class HistoryViewModelTest {
     )
 
     private fun formatter() = RideHistoryFormatter(Locale.US, TimeZone.getTimeZone("UTC"))
+
+    /** Ensures exactly one selected company holds this tariff, whatever is already stored. */
+    private suspend fun useCompany(tariff: Tariff, name: String = "City Taxi") {
+        val existing = repository.observeCompanies().first().firstOrNull { it.name == name }
+        val id = if (existing == null) {
+            repository.createCompany(name, tariff)
+            repository.observeCompanies().first().single { it.name == name }.id
+        } else {
+            repository.updateCompany(existing.id, name, tariff)
+            existing.id
+        }
+        repository.selectCompany(id)
+    }
 
     private companion object {
         const val TIMEOUT_MILLIS = 5_000L

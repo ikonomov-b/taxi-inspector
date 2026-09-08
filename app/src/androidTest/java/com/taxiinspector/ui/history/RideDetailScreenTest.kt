@@ -70,10 +70,22 @@ class RideDetailScreenTest {
         }
     }
 
+    @Test
+    fun aSummaryRecordedBeforeCompaniesExistedIsLabelledRatherThanNamed() {
+        render(
+            detailState().let { state ->
+                state.copy(ride = requireNotNull(state.ride).copy(companyName = null))
+            },
+        )
+
+        composeRule.onNodeWithText("Company not recorded").performScrollTo().assertIsDisplayed()
+    }
+
     private fun detailState() = RideDetailUiState(
         isLoading = false,
         ride = RideDetailPresentation(
             id = "ride-1",
+            companyName = "City Taxi",
             endedAt = "Sep 4, 2026, 2:30 PM",
             total = "6.45",
             distanceKilometres = "2.50",

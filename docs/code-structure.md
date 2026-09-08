@@ -239,7 +239,11 @@ The service runs `START_NOT_STICKY`. Service liveness is not inferred from an `A
 
 ## UI structure and state
 
-The app has Meter, Taxi Companies, Company Editor, History, and Ride Detail destinations. The company editor remains separate from Meter, so the fare reading never shares a screen with entry fields and a soft keyboard. A first run with no saved companies starts in company creation. Later visits use **Manage companies**, while an accessible Meter selector changes the durable selected company before Start without exposing editable tariff fields.
+The app has Meter, Taxi Companies, Company Editor, History, and Ride Detail destinations. The company editor remains separate from Meter, so the fare reading never shares a screen with entry fields and a soft keyboard. A first run with no saved companies starts in company creation, reached as the start destination and offering no way out until a company is saved. Later visits use **Manage companies**, while an accessible Meter selector changes the durable selected company before Start without exposing editable tariff fields.
+
+`ui/tariff/` holds a parked single-tariff editor with no company name, retained for a possible anonymous edition of the product. It compiles and is covered by its own tests but no destination routes to it, and it writes through `RoomRideRepository.saveTariff`, which stores its one tariff as an unnamed company row. Treat it as deliberately unwired, not as dead code.
+
+A company row, in the list and in the Meter selector alike, is one merged selectable node: a screen reader announces the name followed by the rates that distinguish it. It must not override that with `clearAndSetSemantics`, which strips the row's text out of the semantics tree.
 
 Meter observes the company list, selected company, and active ride from Room. Before a ride it shows the selected profile and permits selection; without a selection, Start is disabled. During Running, Paused, or Pending interrupted, it renders the company-name/tariff snapshot from `ActiveRide` and disables selection and management. Ride Detail renders the snapshot in `RideSummary`, so source-company edits and deletion cannot rewrite history.
 

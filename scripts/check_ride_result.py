@@ -101,14 +101,16 @@ def main():
     parser.add_argument("--serial", required=True)
     parser.add_argument("--app-id", default="com.taxiinspector")
     parser.add_argument("--timestamps", default="/tmp/taxi-inspector-drive-profile.json")
-    # A few metres beyond the ~1-fix warm-up cost already netted out of
-    # expected_distance_m: in practice the GPS provider typically takes an
-    # extra fix or two to deliver its first callback after Start (real
-    # receivers have the same acquisition latency), silently absorbing
-    # another step's worth of distance. 40m (~5% of the default profile's
-    # 819m) comfortably covers that without masking an actual regression --
-    # the run that motivated this test undercounted distance by >90%.
-    parser.add_argument("--distance-tolerance-meters", type=float, default=40.0)
+    # Distance slack is counted in 1 Hz steps, not metres, because that is the
+    # shape of the error: beyond the ~1-fix warm-up already netted out of
+    # expected_distance_m, the provider takes an extra fix or two to deliver its
+    # first callback after Start (real receivers have the same acquisition
+    # latency), and each lost fix costs exactly one second of travel. A fixed
+    # 40m was ~2.9 steps at 50 km/h and failed a clean run that lost three;
+    # allowing four steps (~56m, 7% of the default profile's 819m) stays far
+    # from masking a real regression -- the run that motivated this test
+    # undercounted distance by >90%.
+    parser.add_argument("--distance-tolerance-steps", type=float, default=4.0)
     parser.add_argument("--idle-tolerance-ms", type=float, default=3_000)
     parser.add_argument("--fare-tolerance", type=float, default=1e-9)
     args = parser.parse_args()
@@ -125,6 +127,7 @@ def main():
 
     expected_distance_m = (profile["drive_seconds"] - 1) * profile["speed_mps"]
     actual_distance_m = float(row["distanceMeters"])
+    distance_tolerance_m = args.distance_tolerance_steps * profile["speed_mps"]
 
     stationary_elapsed_s = stop_tap_epoch - profile["stationary_start_epoch"]
     expected_idle_ms = max(0.0, stationary_elapsed_s * 1000 - IDLE_ENTRY_MILLIS)
@@ -140,7 +143,7 @@ def main():
     passed = True
     passed &= report(
         "distance", expected_distance_m, actual_distance_m,
-        args.distance_tolerance_meters, "m",
+        distance_tolerance_m, "m",
     )
     passed &= report(
         "idle time", expected_idle_ms, actual_idle_ms,

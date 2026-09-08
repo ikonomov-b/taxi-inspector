@@ -37,9 +37,9 @@ The safety priority is explainability: uncertain GPS data freezes billing rather
 | Local persistence | `app/src/main/java/com/taxiinspector/data/rides/` | Room entities, mappings, DAO, database, forward migrations, repository, and app container. |
 | GPS location adapter | `app/src/main/java/com/taxiinspector/data/location/` | Android-free `LocationClient` boundary, the `LocationManager.GPS_PROVIDER` adapter, and the `GnssStatus` carrier-frequency band classifier. |
 | Foreground tracking | `app/src/main/java/com/taxiinspector/tracking/` | Non-sticky service, serialized ride owner, commands, notifications, prerequisite checks, ownership binding, and recovery coordination. |
-| Application UI | `app/src/main/java/com/taxiinspector/ui/` | `TaxiInspectorApp`, navigation, theme, Meter, Tariff, History, and Ride Detail. UI state is immutable; History observes Room and deletion is confirmed, while Meter renders state and sends commands without owning a ride or reading location. |
+| Application UI | `app/src/main/java/com/taxiinspector/ui/` | `TaxiInspectorApp`, navigation, theme, shared display formatting, Meter, Taxi companies, Company editor, History, and Ride Detail. UI state is immutable; History and the company flow observe Room and every destructive action is confirmed, while Meter renders state and sends commands without owning a ride or reading location. `ui/tariff/` is the parked anonymous single-tariff variant: it builds and is tested, but nothing navigates to it. |
 | Unit tests | `app/src/test/java/com/taxiinspector/` | JVM tests for decimal parsing, fare calculation, and core ride state. |
-| Android integration tests | `app/src/androidTest/java/com/taxiinspector/` | API 35 Room, GPS adapter, foreground service, notification action, recovery, and Compose/state-holder tests for Meter, Tariff, History, and Ride Detail. |
+| Android integration tests | `app/src/androidTest/java/com/taxiinspector/` | API 35 Room, migration, GPS adapter, foreground service, notification action, recovery, and Compose/state-holder tests for Meter, the company flow, History, Ride Detail, and the parked tariff editor. |
 | Room schema | `app/schemas/` | Versioned exported schemas, currently versions 1 and 2. Keep them updated with intentional schema changes, and add a migration test for every new version. |
 | Android resources | `app/src/main/res/` | Vintage palette, launcher/notification resources, and every user-facing string. Visual refinement remains Phase 9 work. |
 | Local dev/emulator scripts | `scripts/` | Boot/install/launch, CI-mirroring check, instrumented-test runner, and a black-box simulated-drive test; see `development-environment.md`. |
@@ -70,7 +70,7 @@ This describes the intended end state. Consult the source index and `build-statu
 | If the task concerns… | Read first | Update when changed |
 | --- | --- | --- |
 | Fare, input, rounding, GPS thresholds, state semantics | `taxi-inspector-design.md` and `ride/` tests | Design, tests, project memory if durable decision changes. |
-| Room schema, history retention, active snapshot | `code-structure.md` and `data/rides/` | Exported schema, build status, and migration tests. |
+| Room schema, company storage, history retention, active snapshot | `code-structure.md` and `data/rides/` | Exported schema, build status, and migration tests. |
 | Location, service, notification, permission | Design background/status sections and code structure flow | Both design docs, manifest, tests, build status. |
 | Compose screen/control/accessibility | Design screen sections and code structure UI section | UI tests, build status, design if interaction changes. |
 | Dependency/tooling/environment | `development-environment.md` | Version catalog, environment notes, build status. |

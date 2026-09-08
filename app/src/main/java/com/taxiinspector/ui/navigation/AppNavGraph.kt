@@ -8,18 +8,29 @@ import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
+import com.taxiinspector.ui.companies.CompanyEditorRoute
+import com.taxiinspector.ui.companies.CompanyListRoute
 import com.taxiinspector.ui.history.HistoryRoute
 import com.taxiinspector.ui.history.RideDetailRoute
 import com.taxiinspector.ui.meter.MeterRoute
-import com.taxiinspector.ui.tariff.TariffRoute
 
-/** The app's four destinations. */
+/** The app's five destinations. */
 object Destinations {
     const val METER = "meter"
-    const val TARIFF = "tariff"
+    const val COMPANIES = "companies"
+    const val COMPANY_ID_ARGUMENT = "companyId"
+
+    /** The optional argument is absent when creating, so one route serves both modes. */
+    const val COMPANY_EDITOR = "companies/editor?$COMPANY_ID_ARGUMENT={$COMPANY_ID_ARGUMENT}"
     const val HISTORY = "history"
     const val RIDE_ID_ARGUMENT = "rideId"
     const val RIDE_DETAIL = "ride/{$RIDE_ID_ARGUMENT}"
+
+    fun companyEditor(companyId: String? = null): String = if (companyId == null) {
+        "companies/editor"
+    } else {
+        "companies/editor?$COMPANY_ID_ARGUMENT=${Uri.encode(companyId)}"
+    }
 
     fun rideDetail(rideId: String): String = "ride/${Uri.encode(rideId)}"
 }
@@ -34,25 +45,44 @@ fun AppNavGraph(startDestination: String, modifier: Modifier = Modifier) {
     ) {
         composable(Destinations.METER) {
             MeterRoute(
-                onEditTariff = { navController.navigate(Destinations.TARIFF) },
+                onManageCompanies = { navController.navigate(Destinations.COMPANIES) },
                 onViewHistory = { navController.navigate(Destinations.HISTORY) },
             )
         }
-        composable(Destinations.TARIFF) {
-            // Tariff is the start destination on first run, so there is nothing to return
-            // to until a tariff exists; after that it is always reached from the meter.
-            val canReturnToMeter = navController.previousBackStackEntry != null
-            TariffRoute(
+        composable(Destinations.COMPANIES) {
+            CompanyListRoute(
+                onBack = { navController.popBackStack() },
+                onAddCompany = { navController.navigate(Destinations.companyEditor()) },
+                onEditCompany = { companyId ->
+                    navController.navigate(Destinations.companyEditor(companyId))
+                },
+            )
+        }
+        composable(
+            route = Destinations.COMPANY_EDITOR,
+            arguments = listOf(
+                navArgument(Destinations.COMPANY_ID_ARGUMENT) {
+                    type = NavType.StringType
+                    nullable = true
+                    defaultValue = null
+                },
+            ),
+        ) { backStackEntry ->
+            // The editor is the start destination on a first run, so there is nothing to
+            // return to until a company exists; after that it is reached from the list.
+            val canReturn = navController.previousBackStackEntry != null
+            CompanyEditorRoute(
+                companyId = backStackEntry.arguments?.getString(Destinations.COMPANY_ID_ARGUMENT),
                 onSaved = {
-                    if (canReturnToMeter) {
+                    if (canReturn) {
                         navController.popBackStack()
                     } else {
                         navController.navigate(Destinations.METER) {
-                            popUpTo(Destinations.TARIFF) { inclusive = true }
+                            popUpTo(Destinations.COMPANY_EDITOR) { inclusive = true }
                         }
                     }
                 },
-                onCancel = if (canReturnToMeter) {
+                onCancel = if (canReturn) {
                     { navController.popBackStack() }
                 } else {
                     null

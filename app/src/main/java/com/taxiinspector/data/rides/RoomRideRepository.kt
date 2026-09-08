@@ -5,6 +5,7 @@ import com.taxiinspector.ride.RideSummary
 import com.taxiinspector.ride.SavedRideSummary
 import com.taxiinspector.ride.Tariff
 import com.taxiinspector.ride.TaxiCompany
+import java.util.UUID
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.map
@@ -25,6 +26,23 @@ class RoomRideRepository(private val dao: RideDao) {
         }
 
     suspend fun selectedCompany(): TaxiCompany? = dao.selectedCompany()?.toDomain()
+
+    suspend fun companyCount(): Int = dao.companyCount()
+
+    /**
+     * Creates a company under a generated stable id. Names arrive as the user typed them and
+     * are stored trimmed; [TaxiCompany] then enforces the nonblank and length invariants.
+     */
+    suspend fun createCompany(name: String, tariff: Tariff): CompanySaveResult =
+        dao.createCompany(TaxiCompany(UUID.randomUUID().toString(), name.trim(), tariff).toEntity())
+
+    suspend fun updateCompany(id: String, name: String, tariff: Tariff): CompanySaveResult =
+        dao.updateCompanyDetails(TaxiCompany(id, name.trim(), tariff).toEntity())
+
+    suspend fun selectCompany(id: String): CompanyChangeResult = dao.selectCompany(id)
+
+    /** Confirmed by the UI before it is called; an active or saved ride keeps its snapshot. */
+    suspend fun deleteCompany(id: String): CompanyChangeResult = dao.deleteCompany(id)
 
     /** Interim: Phase 7A.4 replaces these two with the company selector and editor. */
     fun observeTariff(): Flow<Tariff?> = observeSelectedCompany().map { it?.tariff }

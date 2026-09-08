@@ -39,19 +39,25 @@ fi
 "$ADB" root >/dev/null
 sleep 1
 
-echo "Launching the app; a clean install opens on the tariff screen..."
+echo "Launching the app; a clean install opens on the company editor..."
 "$ADB" -s "$serial" shell am start -n "$APP_ID/$MAIN_ACTIVITY"
 sleep 2
 
-# Typed into the real tariff screen rather than seeded into Room. The tariff
-# now belongs to a saved taxi company instead of the app_settings row, so a
-# direct insert would have to fabricate a company and a selection; typing it
-# exercises the same path a user takes and works without root on a phone.
-echo "Entering a tariff through the app's own tariff screen..."
+# Typed into the real company editor rather than seeded into Room. The tariff
+# belongs to a saved taxi company instead of the app_settings row, so a direct
+# insert would have to fabricate a company row and a selection; typing it
+# exercises the same path a user takes and works without root on a phone. A
+# clean install opens this editor itself, and the first company saved becomes
+# the selection, so Start is available as soon as it is saved.
+echo "Entering a company and its rates through the app's own editor..."
+python3 "$SCRIPT_DIR/ui_dump.py" --serial "$serial" fill "Company name" "Simulated Taxi"
 python3 "$SCRIPT_DIR/ui_dump.py" --serial "$serial" fill "Initial tax" "1.50"
 python3 "$SCRIPT_DIR/ui_dump.py" --serial "$serial" fill "Per km rate" "0.80"
 python3 "$SCRIPT_DIR/ui_dump.py" --serial "$serial" fill "Per minute car-still rate" "0.20"
-python3 "$SCRIPT_DIR/ui_dump.py" --serial "$serial" tap-text "Save tariff"
+# The editor is taller than the old tariff screen, so Save sits under the
+# keyboard until it is dismissed; uiautomator cannot tap what the IME covers.
+python3 "$SCRIPT_DIR/ui_dump.py" --serial "$serial" dismiss-keyboard
+python3 "$SCRIPT_DIR/ui_dump.py" --serial "$serial" tap-text "Save company"
 sleep 2
 
 echo "Starting the ride..."

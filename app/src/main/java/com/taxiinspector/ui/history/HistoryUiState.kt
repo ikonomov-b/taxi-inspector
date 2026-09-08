@@ -32,6 +32,8 @@ data class RideDetailUiState(
 
 data class RideDetailPresentation(
     val id: String,
+    /** Null for a ride saved before companies existed; the screen labels it as unrecorded. */
+    val companyName: String?,
     val endedAt: String,
     val total: String,
     val distanceKilometres: String,

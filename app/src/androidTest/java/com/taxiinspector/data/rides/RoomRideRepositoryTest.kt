@@ -49,15 +49,18 @@ class RoomRideRepositoryTest {
     }
 
     @Test
-    fun startLocksTariffAndFinishAtomicallyMovesRideToHistory() = runBlocking {
+    fun startLocksTheCompanyNameAndTariffAndFinishAtomicallyMovesRideToHistory() = runBlocking {
         val lockedTariff = tariff("1.25", "2.50", "0.75")
-        repository.saveTariff(lockedTariff)
+        saveCompany("City Taxi", lockedTariff)
 
         val active = repository.startRide("ride-1", 1_000)
         assertEquals(lockedTariff, active.tariff)
-        assertThrows(IllegalStateException::class.java) {
-            runBlocking { repository.saveTariff(tariff("9", "9", "9")) }
-        }
+        // The name and the rates are copied together, in one transaction.
+        assertEquals("City Taxi", active.companyName)
+        assertEquals(
+            CompanySaveResult.RideActive,
+            repository.createCompany("Night Cabs", tariff("9", "9", "9")),
+        )
 
         val summary = RideEngine.finish(active, 6_000)
         repository.finishCompleted(summary, endedAtUtcMillis = 100_000)
@@ -68,7 +71,7 @@ class RoomRideRepositoryTest {
 
     @Test
     fun failedFinishRollsBackActiveRideDeletion() = runBlocking {
-        repository.saveTariff(tariff("1", "2", "3"))
+        saveCompany("City Taxi", tariff("1", "2", "3"))
         val existing = repository.startRide("duplicate-id", 1_000)
         val summary = RideEngine.finish(existing, 2_000)
         database.rideDao().insertSummary(
@@ -85,9 +88,10 @@ class RoomRideRepositoryTest {
 
     @Test
     fun elevenSavedRidesKeepNewestTenWithTheirLockedTariffs() = runBlocking {
+        val companyId = saveCompany("City Taxi", tariff("1", "1", "1"))
         for (number in 1..11) {
             val rideTariff = tariff(number.toString(), "$number.25", "$number.5")
-            repository.saveTariff(rideTariff)
+            repository.updateCompany(companyId, "City Taxi", rideTariff)
             val active = repository.startRide("ride-$number", number * 1_000L)
             repository.finishCompleted(
                 RideEngine.finish(active, number * 1_000L + 500),
@@ -107,7 +111,7 @@ class RoomRideRepositoryTest {
 
     @Test
     fun concurrentInterruptedSavesAreIdempotent() = runBlocking {
-        repository.saveTariff(tariff("1", "2", "3"))
+        saveCompany("City Taxi", tariff("1", "2", "3"))
         val active = repository.startRide("interrupted", 1_000)
         val summary = RideEngine.finish(active, 5_000)
 
@@ -123,9 +127,9 @@ class RoomRideRepositoryTest {
     }
 
     @Test
-    fun tariffAndCompleteActiveSnapshotSurviveDatabaseRecreation() = runBlocking {
+    fun companySelectionAndCompleteActiveSnapshotSurviveDatabaseRecreation() = runBlocking {
         val savedTariff = tariff("1.250000", "2.75", "0.500001")
-        repository.saveTariff(savedTariff)
+        val companyId = saveCompany("City Taxi", savedTariff)
         val expected = repository.startRide("recreated", 1_000).copy(
             phase = RidePhase.Paused,
             trackingStatus = TrackingStatus.Weak,
@@ -154,13 +158,16 @@ class RoomRideRepositoryTest {
         database.close()
         openDatabase()
 
-        assertEquals(savedTariff, repository.observeTariff().first())
+        val selected = requireNotNull(repository.observeSelectedCompany().first())
+        assertEquals(companyId, selected.id)
+        assertEquals("City Taxi", selected.name)
+        assertEquals(savedTariff, selected.tariff)
         assertEquals(expected, repository.observeActiveRide().first())
     }
 
     @Test
     fun deletingSummaryLeavesOtherHistoryUntouched() = runBlocking {
-        repository.saveTariff(tariff("1", "2", "3"))
+        saveCompany("City Taxi", tariff("1", "2", "3"))
         val first = repository.startRide("first", 1_000)
         repository.finishCompleted(RideEngine.finish(first, 2_000), 10_000)
         val second = repository.startRide("second", 3_000)
@@ -170,6 +177,87 @@ class RoomRideRepositoryTest {
 
         assertNull(database.rideDao().summary("first"))
         assertNotNull(database.rideDao().summary("second"))
+    }
+
+    @Test
+    fun onlyTenCompaniesSurviveConcurrentAddsAndNoneIsEvicted() = runBlocking {
+        val results = (1..14).map { number ->
+            async(Dispatchers.Default) {
+                repository.createCompany("Company $number", tariff("$number", "1", "1"))
+            }
+        }.awaitAll()
+
+        assertEquals(10, results.count { it == CompanySaveResult.Saved })
+        assertEquals(4, results.count { it == CompanySaveResult.LimitReached })
+        val companies = repository.observeCompanies().first()
+        assertEquals(10, companies.size)
+        assertEquals(10, companies.map { it.name }.toSet().size)
+        // The first insert to win selects itself, and nothing later overwrote that.
+        assertNotNull(repository.selectedCompany())
+    }
+
+    @Test
+    fun aDuplicateNameIsRejectedAfterTrimmingAndCaseFolding() = runBlocking {
+        saveCompany("City Taxi", tariff("1", "2", "3"))
+
+        assertEquals(
+            CompanySaveResult.DuplicateName,
+            repository.createCompany("  CITY taxi ", tariff("9", "9", "9")),
+        )
+        assertEquals(1, repository.observeCompanies().first().size)
+    }
+
+    @Test
+    fun deletingTheSelectedCompanyClearsTheSelectionAndBlocksStart() = runBlocking {
+        val city = saveCompany("City Taxi", tariff("1", "2", "3"))
+        saveCompany("Night Cabs", tariff("5", "2", "0.5"))
+
+        assertEquals(CompanyChangeResult.Done, repository.deleteCompany(city))
+
+        assertNull(repository.selectedCompany())
+        assertEquals(1, repository.observeCompanies().first().size)
+        assertThrows(IllegalStateException::class.java) {
+            runBlocking { repository.startRide("no-selection", 1_000) }
+        }
+        assertNull(repository.currentActiveRide())
+    }
+
+    @Test
+    fun editingOrDeletingACompanyLeavesActiveAndHistoricSnapshotsUnchanged() = runBlocking {
+        val lockedTariff = tariff("1.25", "2.50", "0.75")
+        val companyId = saveCompany("City Taxi", lockedTariff)
+        val finished = repository.startRide("saved-ride", 1_000)
+        repository.finishCompleted(RideEngine.finish(finished, 2_000), endedAtUtcMillis = 10_000)
+        val active = repository.startRide("active-ride", 3_000)
+
+        // Both writes are refused while a ride is active, so the lock holds first.
+        assertEquals(
+            CompanySaveResult.RideActive,
+            repository.updateCompany(companyId, "Renamed", tariff("9", "9", "9")),
+        )
+        assertEquals(CompanyChangeResult.RideActive, repository.deleteCompany(companyId))
+        assertEquals("City Taxi", repository.currentActiveRide()?.companyName)
+
+        repository.finishCompleted(RideEngine.finish(active, 4_000), endedAtUtcMillis = 20_000)
+        assertEquals(
+            CompanySaveResult.Saved,
+            repository.updateCompany(companyId, "Renamed", tariff("9", "9", "9")),
+        )
+        assertEquals(CompanyChangeResult.Done, repository.deleteCompany(companyId))
+
+        // Every saved ride still reproduces the name and the exact rates it recorded.
+        val history = repository.observeHistory().first()
+        assertEquals(2, history.size)
+        history.forEach { saved ->
+            assertEquals("City Taxi", saved.summary.companyName)
+            assertEquals(lockedTariff, saved.summary.tariff)
+        }
+    }
+
+    /** Returns the new company's id; the first one saved selects itself. */
+    private suspend fun saveCompany(name: String, tariff: Tariff): String {
+        assertEquals(CompanySaveResult.Saved, repository.createCompany(name, tariff))
+        return repository.observeCompanies().first().single { it.name == name }.id
     }
 
     private fun openDatabase() {

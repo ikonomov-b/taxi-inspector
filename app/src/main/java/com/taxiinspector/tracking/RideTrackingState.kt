@@ -21,7 +21,7 @@ enum class StartRejection {
     PreciseLocationMissing,
     NotificationPermissionMissing,
     GpsDisabled,
-    TariffMissing,
+    SelectedCompanyMissing,
     ActiveRideExists,
     NoPausedRide,
 }

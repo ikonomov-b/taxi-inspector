@@ -2,8 +2,15 @@ package com.taxiinspector.ui.meter
 
 /** The single entry point through which the meter screen reports user intent. */
 sealed interface MeterAction {
-    /** Opens the tariff destination; refused while a ride holds a locked tariff. */
-    data object EditTariff : MeterAction
+    /** Opens the company list; refused while a ride holds a locked company. */
+    data object ManageCompanies : MeterAction
+
+    data object CompanySelectorOpened : MeterAction
+
+    data object CompanySelectorDismissed : MeterAction
+
+    /** Durably selects the whole profile: its name and all three rates together. */
+    data class CompanySelected(val id: String) : MeterAction
 
     /** Opens the durable saved-ride history. */
     data object ViewHistory : MeterAction

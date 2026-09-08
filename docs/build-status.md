@@ -12,11 +12,11 @@ This is the single authoritative progress record for implementation work. Update
 
 ## Current summary
 
-**Overall state: In progress — phases 0–7 complete; Phase 7A is under way with its Room version-2 schema and migration done, and steps 7A.3–7A.4 remaining before Phase 8.**
+**Overall state: In progress — phases 0–7A complete; Phase 8, the release-readiness gate, is next.**
 
-The project has a reproducible Gradle/Compose baseline, an exact Android-free fare core, an integration-tested Room layer, a GPS-only adapter that also reads satellite status so a dual-band fix can be told from a single-band one, a foreground-service tracking vertical slice, and a working four-destination UI. A user can currently save one tariff, run a visible ride, pause/resume, stop and save or discard after confirmation, then review the newest ten completed/interrupted summaries and delete an individual record after confirmation. Underneath, storage has already moved to the company model: version 2 keeps named companies in their own table, keeps only the selected company id in settings, and locks the company label alongside the tariff on every active and saved ride. The remaining release work is the company repository operations and the selector/editor UI that replace the interim single-tariff bridge.
+The project has a reproducible Gradle/Compose baseline, an exact Android-free fare core, an integration-tested Room layer, a GPS-only adapter that also reads satellite status so a dual-band fix can be told from a single-band one, a foreground-service tracking vertical slice, and a working four-destination UI. A user can currently save up to ten named taxi companies, select one before Start, run a visible ride, pause/resume, stop and save or discard after confirmation, then review the newest ten completed/interrupted summaries with their locked company label and delete an individual record after confirmation. A ride copies the selected company's name and exact rates together at Start, and no later edit, selection change, or deletion can alter an active or saved ride. The remaining release work is Phase 8: accessibility, adaptive layout, privacy, backup, and real-device validation.
 
-Last verified: **2026-09-08**
+Last verified: **2026-09-09**
 
 ```text
 GRADLE_USER_HOME=/tmp/taxi-inspector-gradle \
@@ -27,7 +27,7 @@ scripts/test-instrumented.sh
 BUILD SUCCESSFUL
 ```
 
-The debug JVM report contains 27 tests and the API 35 instrumentation report contains 81 Room/location/service/UI tests, with 0 failures, 0 errors, and 0 skipped tests. Lint reported 0 errors. The preceding 63-test suite also passed on a physical Pixel 8 Pro (Android 17); the History tests, the five fare-boundary tests, and the six version-2 migration tests have so far run on the API 35 emulator/JVM environment only. A black-box upgrade of the shipped APK over a real version-1 database was also driven through the app's own UI on that emulator; the detail is in the Phase 7A step entry below.
+The debug JVM report contains 27 tests and the API 35 instrumentation report contains 113 Room/location/service/UI tests, with 0 failures, 0 errors, and 0 skipped tests. Lint reported 0 errors. The preceding 63-test suite also passed on a physical Pixel 8 Pro (Android 17); the History tests, the five fare-boundary tests, the six version-2 migration tests, and the whole company suite have so far run on the API 35 emulator/JVM environment only. A black-box upgrade of the shipped APK over a real version-1 database, and a full simulated drive through the company editor, were also driven through the app's own UI on that emulator; the detail is in the Phase 7A entries below.
 
 ## Phase tracker
 
@@ -41,7 +41,7 @@ The debug JVM report contains 27 tests and the API 35 instrumentation report con
 | 5. Foreground tracking service | Complete | Non-sticky location FGS, serialized controller, explicit commands, prerequisite rechecks, bounded fare notifications, notification Pause/Stop, ownership binder, persisted pause/stop/discard, and interrupted recovery coordination. | 14 new API 35 tests cover prerequisite/foreground failures, command serialization, permission loss, paused Resume/Stop, Discard, throttling, ownership/recovery, real service binding, screen recreation/off, and actual notification actions. |
 | 6. Essential Meter UI | Complete | Vintage theme and `TaximeterFace`, `MeterScreen`/`MeterRoute`/`MeterViewModel` with immutable state, actions and one-off effects, a separate Tariff destination with exact-decimal validation, permission/GPS gating with Settings recovery, confirmed Discard, and bind-before-recovery wiring. | 32 API 35 tests cover the meter screen, tariff screen, meter state holder, and tariff state holder. Visual refinement of the meter face stays in Phase 9. |
 | 7. History and recovery UI | Complete | Newest-first History and full Ride Detail destinations observe Room directly; completed/interrupted summaries show their required final values and locked tariff, and individual deletion requires confirmation. | 13 new API 35 tests cover meter entry, empty/list/detail rendering, navigation actions, durable formatting, trimming, idempotent interrupted display, and confirmed deletion. |
-| 7A. Saved taxi companies and pre-ride selection | In progress | Step 7A.2 done: `TaxiCompanyEntity` with a unique name-key index, `selectedCompanyId` replacing the settings tariff, a locked `companyName` snapshot on active and saved rides, database version 2 with a tested non-destructive `MIGRATION_1_2`, transactional Start resolving the selection, and observable company/selection reads. | 6 API 35 migration tests prove the version-1 tariff becomes one selected placeholder company with unchanged decimal strings, that existing rides keep their own locked tariff with no invented label, that history survives in order, and that a tariff-less version-1 database migrates to no company and rejects Start. Steps 7A.3–7A.4 remain: the ten-company limit and create/edit/select/delete transactions, and the Meter selector and company-editor UI that replace the interim single-tariff bridge. Phase 8 cannot begin until the 7A exit criteria pass. |
+| 7A. Saved taxi companies and pre-ride selection | Complete | Room version 2 with `TaxiCompanyEntity` under a unique name-key index, `selectedCompanyId` replacing the settings tariff, a locked `companyName` snapshot on active and saved rides, a tested non-destructive `MIGRATION_1_2`, transactional create/edit/select/confirmed-delete enforcing the ten-company limit and the active-ride lock, transactional Start resolving the selection, the Taxi companies and Company editor destinations, and an accessible Meter selector. | 51 new API 35 tests: 6 migration, 4 company repository transactions including concurrent adds, 6 editor and 5 list state-holder, 12 Compose, plus the updated meter and history coverage. A version-1 APK upgraded in place on the emulator, and `scripts/simulate-drive.sh` drove the whole company editor, meter, and fare path black-box. |
 | 8. Quality, accessibility, privacy, and device validation | Not started | Build uses private local storage and has no network permission. | Complete real-device tests, accessibility tests, backup decision, disclosure, and store data-safety work. |
 | 9. Non-essential polish | Not started | — | Vintage visual refinement, onboarding, extra visual regression coverage, and any separately approved optional enhancements. |
 
@@ -80,14 +80,16 @@ The debug JVM report contains 27 tests and the API 35 instrumentation report con
 - A parallel `GnssStatus` subscription carries the latest band observation forward to fixes received within five seconds of it; a stale or absent observation leaves the fix `Unknown`
 - Location collection cancellation unregisters the exact platform listener and the satellite-status callback, and safely tolerates permission revocation
 
-### Meter, tariff, and history UI
+### Meter, company, and history UI
 
-- `ui/TaxiInspectorApp.kt` and `ui/navigation/AppNavGraph.kt`: Meter, Tariff, History, and Ride Detail destinations; a first run with no saved tariff starts on Tariff
+- `ui/TaxiInspectorApp.kt` and `ui/navigation/AppNavGraph.kt`: Meter, Taxi companies, Company editor, History, and Ride Detail destinations; a first run with no saved company starts in company creation
 - `ui/theme/`: the warm paper/charcoal/yellow/LCD palette and the monospaced fare type
-- `ui/meter/MeterViewModel.kt`: derives display state from Room, gates Start/Resume on permissions and the GPS provider, and emits one-off effects
+- `ui/meter/MeterViewModel.kt`: derives display state from Room, gates Start/Resume on permissions and the GPS provider, changes the durable selection, and emits one-off effects
 - `ui/meter/MeterEffect.kt`: permission requests, Settings, service commands, and the ownership check the route performs
-- `ui/meter/MeterScreen.kt` and `TaximeterFace.kt`: state-specific controls, confirmed Discard, and per-value content descriptions
-- `ui/tariff/`: the tariff destination, its exact-decimal validation, and the ride lock
+- `ui/meter/MeterScreen.kt` and `TaximeterFace.kt`: state-specific controls, confirmed Discard, per-value content descriptions, and the pre-ride company selector; during a ride it renders the ride's own locked snapshot
+- `ui/companies/`: the Taxi companies list, the company editor, their exact-decimal and name validation, the ten-company limit, and the ride lock
+- `ui/TariffSummary.kt` and `ui/DestinationHeader.kt`: display formatting and the Back header shared by every destination
+- `ui/tariff/`: the parked anonymous single-tariff editor, kept building and tested but not wired into navigation (see project memory)
 - `ui/history/`: Room-backed newest-first history and ride detail state, locale-aware presentation, and confirmed individual deletion
 - `tracking/RideServiceOwnershipConnection.kt`: binds without `BIND_AUTO_CREATE` so recovery cannot be answered by a service it started
 
@@ -104,7 +106,7 @@ The debug JVM report contains 27 tests and the API 35 instrumentation report con
 2. On a device whose GPS fixes carry no reported speed, waiting time under-reads: derived speed is unavailable for part of a slow crawl, and a stationary vehicle's jitter keeps the engine out of Idle entirely. This follows the design rule that speed which cannot be obtained safely accrues no waiting time, and it errs towards under-reading rather than over-charging. Confirm it against a real device in Phase 8 before deciding whether the derivation needs its own last-accepted-fix reference.
 3. The meter face is functional and accessible but visually plain; the late-1970s styling, texture, and transitions remain Phase 9 work.
 4. Automated service tests use emulator/fake GPS inputs; real street, tunnel, and weak-signal field validation remains part of Phase 8.
-5. The database is now version 2. Its forward migration is proven by six instrumentation tests and by one black-box APK-over-APK upgrade on the API 35 emulator, but not on a physical device; add that to the Phase 8 device pass. The ten-company limit, the active-ride lock on company edits, and selected-company deletion are still unimplemented and therefore untested (steps 7A.3–7A.4).
+5. The database is now version 2. Its forward migration is proven by six instrumentation tests and by one black-box APK-over-APK upgrade on the API 35 emulator, but not on a physical device; add that to the Phase 8 device pass.
 6. The local Android SDK path is machine-specific and remains in ignored `local.properties`; it must never be committed.
 7. Dual-band detection is now confirmed on real hardware (see the second Phase 4 amendment), but the 2.5 m movement floor itself has still never been exercised. The floor is `max(2.5 m, each endpoint's accuracy)`, and the measured accuracy at a window was 4.5 m, so the accuracy term dominated and the tighter floor never bound. It only binds below 2.5 m reported accuracy, which needs open sky. Note that a stationary hold cannot test it either: distance accrues only while the engine is Moving, so a parked vehicle bills nothing whatever the floor is. The discriminating test is steady slow movement at roughly 3 m/s over a measured distance, where 1 Hz segments of about 3 m fall between the two floors. A walk along a measured stretch of open pavement will settle it sooner than a drive, since a windscreen pushes accuracy back above 2.5 m and the floor stops binding again.
 8. In-vehicle behaviour is entirely unmeasured, and a car is harsher than anything tested so far. Two consequences are expected rather than hypothetical. Reported accuracy through a windscreen realistically runs 5-20 m rather than the 4.5 m measured at a window, so the accuracy term sets the movement floor, the 2.5 m dual-band value never binds, and below roughly 54 km/h at 1 Hz the segments fall under the deadband and accumulate as straight-line chords that under-read a curving road. And tunnels and underpasses trip the 15-second GPS Lost rule routinely rather than exceptionally, freezing the fare and resetting the baseline, where a real taximeter counting odometer pulses would not. Both err towards under-reading, which is the intended direction, but neither has been quantified. Phase 8 should capture a real drive before any threshold is revisited; phone placement (a windscreen cradle rather than a cupholder, and note that athermic glass attenuates GNSS badly) is likely to matter more than any constant.
@@ -113,11 +115,14 @@ The debug JVM report contains 27 tests and the API 35 instrumentation report con
 
 ## Next phase gate
 
-Finish Phase 7A. Steps 7A.1 and 7A.2 are done — behaviour is frozen in the design documents, and the version-2 schema, migration, locked snapshots, and transactional Start are implemented and verified. What remains:
+Phase 7A is complete, so Phase 8 — the release-readiness gate — is next, and it now has the final company-selection flow to validate:
 
-- step 7A.3: transactionally bounded create/edit/select/confirmed-delete operations enforcing the ten-company limit under concurrent adds, the active-ride lock, and selection clearing on deletion;
-- step 7A.4: replace the interim single-tariff bridge (`observeTariff`, `currentTariff`, `saveTariff`) with the company-list/editor flow and an accessible Meter selector, show the locked label in Ride Detail, and add the explicit legacy label for pre-migration summaries; and
-- step 7A.5: the remaining repository, state-holder, Compose, and service-regression tests alongside the JVM, instrumentation, and lint suites.
+- accessibility and adaptive layout across Meter, Taxi companies, Company editor, History, and Ride Detail, including font scaling and TalkBack on a physical device;
+- field validation of the GPS thresholds, including the in-vehicle behaviour and the unexercised 2.5 m dual-band floor in risks 7 and 8;
+- the reference-taximeter comparison and the explicit decision gate for bounded GPS-gap reconstruction, which remains unimplemented; and
+- the release privacy work: the backup decision for company tariffs and ride summaries, the estimate-only disclosure, and the Play data-safety declaration.
+
+Phase 8 should also upgrade a physical device across `MIGRATION_1_2`, which has so far only been proven on the emulator, and repeat the company flow there. Phase 9 visual polish must not displace that gate.
 
 Phase 7A is required for release and must complete before Phase 8. Phase 8 remains the release-readiness gate and must validate accessibility, adaptive layout, privacy, backup behaviour, and real-device operation against the final company-selection flow. Phase 9 visual polish must not displace either essential gate.
 
@@ -394,6 +399,45 @@ Verification:
 Remaining risk or next gate:
 - Steps 7A.3 and 7A.4 remain, and until 7A.4 lands the app still edits a single tariff and shows no company name; the interim bridge keeps exactly one placeholder company in the database.
 - The migration is proven only against synthetic version-1 fixtures on the emulator. Phase 8 should upgrade a real device across it.
+
+### Phase 7A steps 7A.3–7A.5 — company transactions, the management flow, and the Meter selector
+
+Status: Complete
+Date: 2026-09-09
+Delivered:
+- Added transactional `createCompany`, `updateCompanyDetails`, `selectCompany`, and `deleteCompany` to `RideDao`. Every guard runs inside the transaction, so a concurrent add cannot pass the ten-company limit or the duplicate-name rule between the check and the insert, and no company is ever evicted to make room.
+- Only the very first company selects itself. Adding one after the selected company was deleted does not silently choose for the user, which is what the product rule requires.
+- Deleting the selected company clears the selection in the same transaction, so Start stays unavailable until another is chosen explicitly.
+- Added the `ui/companies/` package: the Taxi companies list (radio selection, per-row Edit and Delete, Add with its limit explanation, confirmed deletion naming the company and saying what survives) and the company editor, which reuses the exact-decimal rate validation and adds trimmed, nonblank, 80-character name validation with its own messages.
+- Replaced the meter's inline tariff block with a Selected company block: the name and rates stay visible, Change opens an accessible selector listing each profile with enough rate detail to tell two apart, and Manage companies opens the list. During any active phase both controls are disabled and the meter renders the ride's own locked snapshot rather than the current selection.
+- Ride Detail now shows the locked company name, and a summary recorded before companies existed shows an explicit unrecorded label instead of an invented identity.
+- Navigation grew to five destinations, and a first run with no companies opens company creation with no path to Start.
+- Kept `ui/tariff/` as the parked anonymous single-tariff variant: it still builds and is still tested, but nothing navigates to it. Its storage path is `RoomRideRepository.saveTariff`, which writes one unnamed company row, so both variants share the version-2 schema.
+
+Why the shape:
+- `RideEngine.start` takes a `TaxiCompany` rather than a name and a tariff, so a ride cannot lock a name from one company and rates from another.
+- The observable selection is composed from the settings and company flows rather than a joined query, so a selection whose company has been deleted reads as no selection instead of a dangling id.
+- Company rows are one merged selectable node rather than a custom content description. A screen reader announces the name and its rates as one option, and the names stay findable by every text query, which the custom label had silently prevented.
+- The list holds no transient error state. Its refusals are already durable state: a started ride disables management with a visible reason, and a company deleted elsewhere simply leaves the list.
+
+Verification:
+- Command: `GRADLE_USER_HOME=/tmp/taxi-inspector-gradle JAVA_HOME=/opt/android-studio-for-platform/jbr ./gradlew --no-daemon test lintDebug`
+- Result: `BUILD SUCCESSFUL`; 27 debug JVM tests passed and lint reported 0 errors.
+- Command: `GRADLE_USER_HOME=/tmp/taxi-inspector-gradle JAVA_HOME=/opt/android-studio-for-platform/jbr scripts/test-instrumented.sh`
+- Result: `BUILD SUCCESSFUL`; 113 of 113 API 35 emulator tests passed with 0 failures, errors, or skips, up from 81. The new coverage is 4 repository transaction tests (concurrent adds against the limit, case-insensitive duplicates, selected-company deletion blocking Start, and edits or deletion leaving active and historic snapshots unchanged), 6 editor and 5 list state-holder tests, and 12 Compose tests across both company screens, plus meter tests for the selector, the locked snapshot, and the unrecorded-name case.
+- Command: `GRADLE_USER_HOME=/tmp/taxi-inspector-gradle JAVA_HOME=/opt/android-studio-for-platform/jbr scripts/simulate-drive.sh`
+- Result: `All checks passed`, driving the company editor, the meter, and the fare path black-box on a clean install; the persisted total matched the engine's own arithmetic exactly.
+- Walked the real app on the emulator: a company added through the editor did not steal the selection, the Meter selector switched the whole profile durably, a ride locked `Night Cabs` with its rates into both the active row and its summary, Ride Detail showed that label, and during the ride both Change and Manage companies were inert.
+
+Four defects the tests caught, all fixed:
+- `RoomRideRepository.createCompany` passed the raw typed name to `TaxiCompany`, whose trimmed-name invariant then threw instead of storing `"  CITY taxi "` as a duplicate of `City Taxi`. The repository now trims at the boundary.
+- Company rows used `clearAndSetSemantics`, which removed the company names from the semantics tree entirely, so no text query could find them.
+- A Compose typing test rendered a screen that could not hold what it reported, so every field reported an extra empty change; it now uses a stateful render like the tariff typing test.
+- One new test asserted the company list and the selection in the same snapshot. Deleting touches both tables, so the two flows can settle in either order; the test now waits for the state they converge on. No stale selection can be shown either way, which is why the selection is composed rather than joined.
+
+Remaining risk or next gate:
+- The whole company flow has emulator coverage only. Phase 8 owns the TalkBack, font-scaling, adaptive-layout, and physical-device pass, and should upgrade a real device across `MIGRATION_1_2`.
+- An edit re-saves untouched rates from their displayed form, so a stored `2.40` becomes `2.4`. The values are numerically identical and display identically, because configured costs omit trailing zeroes by design.
 
 ## Update template
 

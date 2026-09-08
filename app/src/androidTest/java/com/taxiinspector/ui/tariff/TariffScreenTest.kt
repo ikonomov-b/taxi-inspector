@@ -12,6 +12,7 @@ import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performTextInput
 import androidx.test.ext.junit.runners.AndroidJUnit4
+import com.taxiinspector.ui.TariffSummary
 import com.taxiinspector.ui.theme.TaxiInspectorTheme
 import org.junit.Assert.assertEquals
 import org.junit.Rule

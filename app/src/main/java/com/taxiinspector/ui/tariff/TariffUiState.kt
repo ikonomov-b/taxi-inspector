@@ -1,5 +1,7 @@
 package com.taxiinspector.ui.tariff
 
+import com.taxiinspector.ui.TariffSummary
+
 /** The tariff destination's complete display state. */
 data class TariffUiState(
     val form: TariffFormState = TariffFormState(),
@@ -30,13 +32,6 @@ data class TariffFormState(
         TariffField.PerMinuteStillRate -> copy(perMinuteStillRate = value)
     }
 }
-
-/** The saved tariff, formatted without trailing zeroes and without a currency label. */
-data class TariffSummary(
-    val initialTax: String,
-    val perKmRate: String,
-    val perMinuteStillRate: String,
-)
 
 /** The single entry point through which the tariff screen reports user intent. */
 sealed interface TariffAction {

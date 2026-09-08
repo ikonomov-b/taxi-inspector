@@ -17,18 +17,22 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.foundation.selection.selectable
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import com.taxiinspector.R
+import com.taxiinspector.ui.companies.CompanySummary
 
 /**
  * The meter screen. It renders [MeterUiState] and reports intent through [onAction]; it
@@ -101,7 +105,7 @@ fun MeterScreen(
                 )
             }
 
-            CurrentTariff(state, onAction)
+            SelectedCompany(state, onAction)
 
             OutlinedButton(
                 onClick = { onAction(MeterAction.ViewHistory) },
@@ -126,11 +130,23 @@ fun MeterScreen(
             onDismiss = { onAction(MeterAction.DiscardDismissed) },
         )
     }
+
+    if (state.isCompanySelectorVisible) {
+        CompanySelectorDialog(
+            companies = state.companies,
+            selectedId = state.selectedCompanyId,
+            onSelect = { onAction(MeterAction.CompanySelected(it)) },
+            onDismiss = { onAction(MeterAction.CompanySelectorDismissed) },
+        )
+    }
 }
 
-/** The tariff stays visible beneath the meter; editing happens on its own destination. */
+/**
+ * The company and its tariff stay visible beneath the meter. Selection changes the durable
+ * profile before a ride; during one this shows the ride's own locked snapshot instead.
+ */
 @Composable
-private fun CurrentTariff(state: MeterUiState, onAction: (MeterAction) -> Unit) {
+private fun SelectedCompany(state: MeterUiState, onAction: (MeterAction) -> Unit) {
     Column(modifier = Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
         HorizontalDivider()
         Row(
@@ -140,38 +156,114 @@ private fun CurrentTariff(state: MeterUiState, onAction: (MeterAction) -> Unit) 
         ) {
             Column(modifier = Modifier.weight(1f)) {
                 Text(
-                    text = stringResource(R.string.tariff_title),
-                    style = MaterialTheme.typography.titleMedium,
-                )
-                Text(
-                    text = state.savedTariff?.let {
-                        stringResource(
-                            R.string.tariff_summary,
-                            it.initialTax,
-                            it.perKmRate,
-                            it.perMinuteStillRate,
-                        )
-                    } ?: stringResource(R.string.tariff_none_saved),
+                    text = stringResource(R.string.meter_selected_company),
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
+                Text(
+                    // A ride locked before companies existed has no name to show, and the app
+                    // must not invent one, so it is labelled as unrecorded instead.
+                    text = state.company?.name
+                        ?: stringResource(
+                            if (state.company == null) {
+                                R.string.meter_no_company
+                            } else {
+                                R.string.company_legacy_label
+                            },
+                        ),
+                    style = MaterialTheme.typography.titleMedium,
+                )
+                state.company?.tariff?.let { tariff ->
+                    Text(
+                        text = stringResource(
+                            R.string.tariff_summary,
+                            tariff.initialTax,
+                            tariff.perKmRate,
+                            tariff.perMinuteStillRate,
+                        ),
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
             }
             TextButton(
-                onClick = { onAction(MeterAction.EditTariff) },
-                enabled = state.canEditTariff,
+                onClick = { onAction(MeterAction.CompanySelectorOpened) },
+                enabled = state.canManageCompanies && state.companies.isNotEmpty(),
                 modifier = Modifier.heightIn(min = 48.dp),
             ) {
-                Text(stringResource(R.string.action_edit_tariff))
+                Text(stringResource(R.string.action_change_company))
             }
         }
-        if (!state.canEditTariff) {
+        TextButton(
+            onClick = { onAction(MeterAction.ManageCompanies) },
+            enabled = state.canManageCompanies,
+            modifier = Modifier.heightIn(min = 48.dp),
+        ) {
+            Text(stringResource(R.string.action_manage_companies))
+        }
+        if (!state.canManageCompanies) {
             Text(
-                text = stringResource(R.string.tariff_locked),
+                text = stringResource(R.string.company_locked),
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
     }
+}
+
+/** Lists each saved profile with enough tariff detail to tell two of them apart. */
+@Composable
+private fun CompanySelectorDialog(
+    companies: List<CompanySummary>,
+    selectedId: String?,
+    onSelect: (String) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(stringResource(R.string.company_selector_title)) },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                companies.forEach { company ->
+                    val tariffSummary = stringResource(
+                        R.string.tariff_summary,
+                        company.tariff.initialTax,
+                        company.tariff.perKmRate,
+                        company.tariff.perMinuteStillRate,
+                    )
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .selectable(
+                                selected = company.id == selectedId,
+                                role = Role.RadioButton,
+                                onClick = { onSelect(company.id) },
+                            )
+                            .heightIn(min = 48.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        // The selectable row merges its children, so each option is
+                        // announced as its name followed by the rates that distinguish it.
+                        RadioButton(selected = company.id == selectedId, onClick = null)
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(text = company.name, style = MaterialTheme.typography.titleMedium)
+                            Text(
+                                text = tariffSummary,
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onDismiss) {
+                Text(stringResource(R.string.action_cancel))
+            }
+        },
+    )
 }
 
 @Composable
@@ -333,7 +425,7 @@ private fun MeterPhaseLabel.labelRes(): Int = when (this) {
 
 @StringRes
 private fun MeterStatus.labelRes(): Int = when (this) {
-    MeterStatus.TariffNeeded -> R.string.status_tariff_needed
+    MeterStatus.CompanyNeeded -> R.string.status_company_needed
     MeterStatus.ReadyToStart -> R.string.status_ready
     MeterStatus.PermissionNeeded -> R.string.gps_status_permission_needed
     MeterStatus.NotificationsNeeded -> R.string.status_notifications_needed
@@ -355,5 +447,5 @@ private fun MeterRecovery.labelRes(): Int = when (this) {
 
 @StringRes
 private fun MeterMessage.labelRes(): Int = when (this) {
-    MeterMessage.TariffNeededToStart -> R.string.tariff_needed_to_start
+    MeterMessage.CompanyNeededToStart -> R.string.company_needed_to_start
 }

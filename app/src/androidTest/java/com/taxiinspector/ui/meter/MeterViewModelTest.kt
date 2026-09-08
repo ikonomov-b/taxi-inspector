@@ -11,7 +11,7 @@ import com.taxiinspector.ride.Tariff
 import com.taxiinspector.core.decimal.DecimalAmount
 import com.taxiinspector.tracking.RideCommand
 import com.taxiinspector.tracking.RideRecoveryCoordinator
-import com.taxiinspector.ui.tariff.TariffSummary
+import com.taxiinspector.ui.TariffSummary
 import java.math.BigDecimal
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -33,8 +33,8 @@ import org.junit.runner.RunWith
 
 /**
  * Exercises the meter state holder against a real in-memory Room database, so the durable
- * state, the tariff lock, the permission/GPS gate, and interrupted recovery are verified
- * without a live foreground service.
+ * state, company selection and its ride lock, the permission/GPS gate, and interrupted
+ * recovery are verified without a live foreground service.
  */
 @RunWith(AndroidJUnit4::class)
 class MeterViewModelTest {
@@ -64,17 +64,39 @@ class MeterViewModelTest {
     }
 
     @Test
-    fun startWithoutASavedTariffAsksForOneAndSendsNoCommand() = runBlocking {
+    fun startWithoutASelectedCompanyAsksForOneAndSendsNoCommand() = runBlocking {
         viewModel.onAction(MeterAction.EnvironmentChanged(readyEnvironment()))
         viewModel.onAction(MeterAction.StartRide)
 
-        awaitState { it.message == MeterMessage.TariffNeededToStart }
+        val state = awaitState { it.message == MeterMessage.CompanyNeededToStart }
+        assertEquals(MeterStatus.CompanyNeeded, state.status)
+        assertNull(state.company)
         assertNull(nextEffectOrNull())
     }
 
     @Test
+    fun theSelectorDurablySelectsAWholeProfileAndEnablesStart() = runBlocking {
+        saveCompany("City Taxi", "2.40", "1.20", "0.35")
+        repository.createCompany("Night Cabs", tariff("5", "2", "0.5"))
+        val night = awaitState { it.companies.size == 2 }.companies.single { it.name == "Night Cabs" }
+
+        viewModel.onAction(MeterAction.CompanySelectorOpened)
+        assertTrue(awaitState { it.isCompanySelectorVisible }.isCompanySelectorVisible)
+
+        viewModel.onAction(MeterAction.CompanySelected(night.id))
+
+        val state = awaitState { it.company?.name == "Night Cabs" }
+        assertEquals(false, state.isCompanySelectorVisible)
+        assertEquals(TariffSummary("5", "2", "0.5"), state.company?.tariff)
+        assertEquals(night.id, state.selectedCompanyId)
+        // Selecting a name selects all three of its rates together, durably.
+        assertEquals("Night Cabs", repository.selectedCompany()?.name)
+        assertTrue(state.canStart)
+    }
+
+    @Test
     fun startRequestsPreciseLocationFirstAndCommandsTheServiceOnceGranted() = runBlocking {
-        saveTariff()
+        saveCompany()
         viewModel.onAction(MeterAction.EnvironmentChanged(MeterEnvironment()))
         viewModel.onAction(MeterAction.StartRide)
 
@@ -85,7 +107,7 @@ class MeterViewModelTest {
 
     @Test
     fun aDeniedPermissionStopsTheStartAndOffersASettingsRecovery() = runBlocking {
-        saveTariff()
+        saveCompany()
         viewModel.onAction(MeterAction.EnvironmentChanged(MeterEnvironment()))
         viewModel.onAction(MeterAction.StartRide)
         assertEquals(MeterEffect.RequestPreciseLocationPermission, nextEffect())
@@ -102,7 +124,7 @@ class MeterViewModelTest {
 
     @Test
     fun aDisabledGpsProviderBlocksStartUntilItIsTurnedOn() = runBlocking {
-        saveTariff()
+        saveCompany()
         viewModel.onAction(
             MeterAction.EnvironmentChanged(readyEnvironment().copy(isGpsProviderEnabled = false)),
         )
@@ -122,23 +144,35 @@ class MeterViewModelTest {
     }
 
     @Test
-    fun anActiveRideWithdrawsTariffEditingAndStarting() = runBlocking {
-        saveTariff()
-        assertTrue(awaitState { it.canStart }.canEditTariff)
+    fun anActiveRideWithdrawsCompanyManagementAndStarting() = runBlocking {
+        saveCompany()
+        assertTrue(awaitState { it.canStart }.canManageCompanies)
 
         repository.startRide("ride-lock", 1_000)
 
-        val locked = awaitState { !it.canEditTariff }
+        val locked = awaitState { !it.canManageCompanies }
         assertEquals(false, locked.canStart)
-        assertEquals(
-            TariffSummary("2.4", "1.2", "0.35"),
-            locked.savedTariff,
-        )
+        // The ride's own locked snapshot, and nothing selectable while it holds it.
+        assertEquals(MeterCompany("City Taxi", TariffSummary("2.4", "1.2", "0.35")), locked.company)
+        assertTrue(locked.companies.isEmpty())
+        assertNull(locked.selectedCompanyId)
+    }
+
+    @Test
+    fun aRideLockedBeforeCompaniesExistedShowsNoInventedName() = runBlocking {
+        saveCompany()
+        val ride = repository.startRide("ride-legacy", 1_000)
+        repository.updateActiveRide(ride.copy(companyName = null))
+
+        val state = awaitState { it.company != null && it.company?.name == null }
+        assertNull(state.company?.name)
+        // Its own locked rates still show, so the fare stays explainable.
+        assertEquals(TariffSummary("2.4", "1.2", "0.35"), state.company?.tariff)
     }
 
     @Test
     fun theMeterPresentsTheDocumentedFareExampleWithoutACurrencyLabel() = runBlocking {
-        saveTariff()
+        saveCompany()
         val ride = repository.startRide("ride-fare", 1_000)
         repository.updateActiveRide(
             ride.copy(distanceMeters = BigDecimal("2500"), idleMillis = 180_000),
@@ -153,9 +187,9 @@ class MeterViewModelTest {
 
     @Test
     fun discardRequiresConfirmationBeforeAnyCommandIsSent() = runBlocking {
-        saveTariff()
+        saveCompany()
         repository.startRide("ride-discard", 1_000)
-        awaitState { !it.canEditTariff }
+        awaitState { !it.canManageCompanies }
         drainEffects()
 
         viewModel.onAction(MeterAction.DiscardRequested)
@@ -173,9 +207,9 @@ class MeterViewModelTest {
 
     @Test
     fun pauseAndStopReachTheServiceAsExplicitCommands() = runBlocking {
-        saveTariff()
+        saveCompany()
         repository.startRide("ride-commands", 1_000)
-        awaitState { !it.canEditTariff }
+        awaitState { !it.canManageCompanies }
         drainEffects()
 
         viewModel.onAction(MeterAction.PauseRide)
@@ -186,7 +220,7 @@ class MeterViewModelTest {
 
     @Test
     fun aRunningSnapshotIsCheckedOnceAndRecoveredOnlyWhenNoServiceOwnsIt() = runBlocking {
-        saveTariff()
+        saveCompany()
         val ride = repository.startRide("ride-orphan", 1_000)
 
         assertEquals(MeterEffect.CheckServiceOwnership(ride.id), nextEffect())
@@ -207,7 +241,7 @@ class MeterViewModelTest {
 
     @Test
     fun aRunningSnapshotOwnedByALiveServiceIsLeftRunning() = runBlocking {
-        saveTariff()
+        saveCompany()
         val ride = repository.startRide("ride-owned", 1_000)
 
         assertEquals(MeterEffect.CheckServiceOwnership(ride.id), nextEffect())
@@ -219,9 +253,15 @@ class MeterViewModelTest {
         assertEquals(RidePhase.Running, repository.currentActiveRide()?.phase)
     }
 
-    /** The tariff is owned by its own destination, so this writes it directly. */
-    private suspend fun saveTariff() {
-        repository.saveTariff(tariff("2.40", "1.20", "0.35"))
+    /** Companies are owned by their own destination, so this writes one directly. */
+    private suspend fun saveCompany(
+        name: String = "City Taxi",
+        initialTax: String = "2.40",
+        perKm: String = "1.20",
+        perMinute: String = "0.35",
+    ) {
+        // The first saved company selects itself, so the meter becomes startable.
+        repository.createCompany(name, tariff(initialTax, perKm, perMinute))
         awaitState { it.canStart }
         drainEffects()
     }

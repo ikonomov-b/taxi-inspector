@@ -4,12 +4,14 @@ import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
 import androidx.test.ext.junit.runners.AndroidJUnit4
-import com.taxiinspector.ui.tariff.TariffSummary
+import com.taxiinspector.ui.TariffSummary
+import com.taxiinspector.ui.companies.CompanySummary
 import com.taxiinspector.ui.theme.TaxiInspectorTheme
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
@@ -42,11 +44,22 @@ class MeterScreenTest {
     }
 
     @Test
-    fun startIsUnavailableUntilATariffHasBeenSaved() {
-        render(readyState().copy(canStart = false, savedTariff = null, status = MeterStatus.TariffNeeded))
+    fun startIsUnavailableUntilACompanyIsSelected() {
+        render(
+            readyState().copy(
+                canStart = false,
+                company = null,
+                companies = emptyList(),
+                selectedCompanyId = null,
+                status = MeterStatus.CompanyNeeded,
+            ),
+        )
 
         composeRule.onNodeWithText("Start ride").assertIsNotEnabled()
-        composeRule.onNodeWithText("Save a tariff to start").assertIsDisplayed()
+        composeRule.onNodeWithText("Select a taxi company to start").assertIsDisplayed()
+        composeRule.onNodeWithText("No company selected").performScrollTo().assertIsDisplayed()
+        // With nothing to choose between, the selector itself stays unavailable.
+        composeRule.onNodeWithText("Change").performScrollTo().assertIsNotEnabled()
     }
 
     @Test
@@ -109,24 +122,61 @@ class MeterScreenTest {
     }
 
     @Test
-    fun tariffEditingIsLockedAndExplainedWhileARideIsActive() {
+    fun companySelectionIsLockedAndExplainedWhileARideIsActive() {
         render(runningState())
 
-        composeRule.onNodeWithText("Edit").performScrollTo().assertIsNotEnabled()
-        composeRule.onNodeWithText("Tariff editing is locked while a ride is active.")
+        composeRule.onNodeWithText("Change").performScrollTo().assertIsNotEnabled()
+        composeRule.onNodeWithText("Manage companies").performScrollTo().assertIsNotEnabled()
+        composeRule.onNodeWithText("The ride keeps the company and rates it locked at Start.")
             .performScrollTo()
             .assertIsDisplayed()
     }
 
     @Test
-    fun theCurrentTariffStaysVisibleAndOpensItsOwnDestination() {
-        render(readyState())
+    fun aRideLockedBeforeCompaniesExistedIsLabelledRatherThanNamed() {
+        render(runningState().copy(company = MeterCompany(null, TariffSummary("2.4", "1.2", "0.35"))))
 
+        composeRule.onNodeWithText("Company not recorded").performScrollTo().assertIsDisplayed()
         composeRule.onNodeWithText("Initial 2.4 · 1.2/km · 0.35/min")
             .performScrollTo()
             .assertIsDisplayed()
-        composeRule.onNodeWithText("Edit").performScrollTo().assertIsEnabled().performClick()
-        assertEquals(listOf(MeterAction.EditTariff), actions)
+    }
+
+    @Test
+    fun theSelectedCompanyStaysVisibleAndManagementOpensItsOwnDestination() {
+        render(readyState())
+
+        composeRule.onNodeWithText("City Taxi").performScrollTo().assertIsDisplayed()
+        composeRule.onNodeWithText("Initial 2.4 · 1.2/km · 0.35/min")
+            .performScrollTo()
+            .assertIsDisplayed()
+        composeRule.onNodeWithText("Manage companies")
+            .performScrollTo()
+            .assertIsEnabled()
+            .performClick()
+        assertEquals(listOf(MeterAction.ManageCompanies), actions)
+    }
+
+    @Test
+    fun theSelectorListsEachProfileWithItsRatesAndReportsTheChoice() {
+        render(
+            readyState().copy(
+                isCompanySelectorVisible = true,
+                companies = listOf(
+                    CompanySummary("city", "City Taxi", TariffSummary("2.4", "1.2", "0.35")),
+                    CompanySummary("night", "Night Cabs", TariffSummary("5", "2", "0.5")),
+                ),
+                selectedCompanyId = "city",
+            ),
+        )
+
+        // Enough tariff detail to tell two companies apart, merged into one option.
+        composeRule
+            .onNode(hasText("Night Cabs") and hasText("Initial 5 · 2/km · 0.5/min"))
+            .assertExists()
+            .performClick()
+
+        assertEquals(listOf(MeterAction.CompanySelected("night")), actions)
     }
 
     @Test
@@ -182,7 +232,11 @@ class MeterScreenTest {
     }
 
     private fun readyState() = MeterUiState(
-        savedTariff = TariffSummary("2.4", "1.2", "0.35"),
+        company = MeterCompany("City Taxi", TariffSummary("2.4", "1.2", "0.35")),
+        companies = listOf(
+            CompanySummary("city", "City Taxi", TariffSummary("2.4", "1.2", "0.35")),
+        ),
+        selectedCompanyId = "city",
         status = MeterStatus.ReadyToStart,
         canStart = true,
     )
@@ -198,6 +252,8 @@ class MeterScreenTest {
         ),
         status = MeterStatus.Good,
         canStart = false,
-        canEditTariff = false,
+        canManageCompanies = false,
+        companies = emptyList(),
+        selectedCompanyId = null,
     )
 }

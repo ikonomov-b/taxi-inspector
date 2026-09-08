@@ -39,7 +39,7 @@ private const val MESSAGE_VISIBLE_MILLIS = 4_000L
  */
 @Composable
 fun MeterRoute(
-    onEditTariff: () -> Unit,
+    onManageCompanies: () -> Unit,
     onViewHistory: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -132,7 +132,7 @@ fun MeterRoute(
         state = state,
         onAction = { action ->
             when (action) {
-                MeterAction.EditTariff -> onEditTariff()
+                MeterAction.ManageCompanies -> onManageCompanies()
                 MeterAction.ViewHistory -> onViewHistory()
                 else -> viewModel.onAction(action)
             }

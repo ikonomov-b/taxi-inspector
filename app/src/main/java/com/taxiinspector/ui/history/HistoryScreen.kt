@@ -27,6 +27,7 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import com.taxiinspector.R
+import com.taxiinspector.ui.DestinationHeader
 
 /** Newest-first durable ride summaries. The screen receives formatted values only. */
 @Composable
@@ -65,26 +66,6 @@ fun HistoryScreen(
     }
 }
 
-@Composable
-internal fun DestinationHeader(title: String, onBack: () -> Unit) {
-    Row(
-        modifier = Modifier.fillMaxWidth(),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
-    ) {
-        TextButton(
-            onClick = onBack,
-            modifier = Modifier.heightIn(min = 48.dp),
-        ) {
-            Text(stringResource(R.string.action_back))
-        }
-        Text(
-            text = title,
-            style = MaterialTheme.typography.headlineSmall,
-            modifier = Modifier.weight(1f),
-        )
-    }
-}
 
 @Composable
 private fun EmptyHistory() {

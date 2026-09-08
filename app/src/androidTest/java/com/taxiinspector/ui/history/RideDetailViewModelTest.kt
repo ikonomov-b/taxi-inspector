@@ -87,7 +87,7 @@ class RideDetailViewModelTest {
     }
 
     private suspend fun saveCompleted(id: String, endedAtUtcMillis: Long) {
-        repository.saveTariff(tariff())
+        useCompany(tariff())
         val active = repository.startRide(id, 1_000).copy(
             distanceMeters = BigDecimal("2500"),
             idleMillis = 180_000,
@@ -110,6 +110,19 @@ class RideDetailViewModelTest {
     )
 
     private fun formatter() = RideHistoryFormatter(Locale.US, TimeZone.getTimeZone("UTC"))
+
+    /** Ensures exactly one selected company holds this tariff, whatever is already stored. */
+    private suspend fun useCompany(tariff: Tariff, name: String = "City Taxi") {
+        val existing = repository.observeCompanies().first().firstOrNull { it.name == name }
+        val id = if (existing == null) {
+            repository.createCompany(name, tariff)
+            repository.observeCompanies().first().single { it.name == name }.id
+        } else {
+            repository.updateCompany(existing.id, name, tariff)
+            existing.id
+        }
+        repository.selectCompany(id)
+    }
 
     private companion object {
         const val TIMEOUT_MILLIS = 5_000L

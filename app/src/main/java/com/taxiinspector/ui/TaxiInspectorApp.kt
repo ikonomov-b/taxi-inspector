@@ -17,8 +17,8 @@ import com.taxiinspector.ui.navigation.Destinations
 import com.taxiinspector.ui.theme.TaxiInspectorTheme
 
 /**
- * The application's composable entry point. A first run with no saved tariff opens the
- * tariff destination directly, so the meter is never shown without rates to bill with.
+ * The application's composable entry point. A first run with no saved company opens the
+ * company editor directly, so the meter is never shown without rates to bill with.
  */
 @Composable
 fun TaxiInspectorApp() {
@@ -29,8 +29,8 @@ fun TaxiInspectorApp() {
     // Resolved before the first destination is composed, so the meter never flashes past.
     var startDestination by remember(repository) { mutableStateOf<String?>(null) }
     LaunchedEffect(repository) {
-        startDestination = if (repository.currentTariff() == null) {
-            Destinations.TARIFF
+        startDestination = if (repository.companyCount() == 0) {
+            Destinations.companyEditor()
         } else {
             Destinations.METER
         }

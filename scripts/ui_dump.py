@@ -94,7 +94,9 @@ def fill_field(serial, local_path, label, value):
     adb(serial, "shell", "input", "keyevent", "123")  # KEYCODE_MOVE_END
     for _ in range(20):
         adb(serial, "shell", "input", "keyevent", "67")  # KEYCODE_DEL
-    adb(serial, "shell", "input", "text", value)
+    # `input text` splits its argument on spaces, so they go over as the %s escape it
+    # understands; a company name is the first value here that can contain one.
+    adb(serial, "shell", "input", "text", value.replace(" ", "%s"))
     time.sleep(0.5)
 
     root = dump(serial, local_path)
@@ -103,16 +105,20 @@ def fill_field(serial, local_path, label, value):
         sys.exit(f"field {label!r} did not end up as {value!r}, found: {values}")
 
 
-def dismiss_keyboard(serial, local_path, attempts=15, interval=0.2):
-    """Closes the soft keyboard so elements it was covering (which
-    uiautomator reports as zero-bounds) become reachable again."""
+def dismiss_keyboard(serial, _local_path, attempts=15, interval=0.2):
+    """Closes the soft keyboard so elements it was covering (which uiautomator
+    reports as zero-bounds, or omits) become reachable again.
+
+    Polls the input method's own `mInputShown` rather than the field's focus:
+    Compose keeps a text field focused after the IME hides, so focus never
+    settles and waiting on it always timed out."""
     adb(serial, "shell", "input", "keyevent", "4")  # KEYCODE_BACK
     for _ in range(attempts):
-        root = dump(serial, local_path)
-        if not any(n.get("focused") == "true" for n in find_all(root, cls="android.widget.EditText")):
+        shown = adb(serial, "shell", "dumpsys", "input_method").stdout
+        if "mInputShown=true" not in shown:
             return
         time.sleep(interval)
-    sys.exit("keyboard did not dismiss (a field is still focused)")
+    sys.exit("keyboard did not dismiss (mInputShown is still true)")
 
 
 def list_nodes(serial, local_path):

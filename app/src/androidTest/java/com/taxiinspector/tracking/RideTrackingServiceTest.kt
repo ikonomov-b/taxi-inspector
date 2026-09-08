@@ -54,7 +54,7 @@ class RideTrackingServiceTest {
     @Before
     fun setUp() = runBlocking {
         repository.currentActiveRide()?.let { repository.discardActiveRide(it.id) }
-        repository.saveTariff(
+        useCompany(
             com.taxiinspector.ride.Tariff(
                 DecimalAmount.of(BigDecimal("1.25")),
                 DecimalAmount.of(BigDecimal("2.50")),
@@ -182,5 +182,18 @@ class RideTrackingServiceTest {
         val descriptor = InstrumentationRegistry.getInstrumentation().uiAutomation
             .executeShellCommand(command)
         ParcelFileDescriptor.AutoCloseInputStream(descriptor).use { it.readBytes() }
+    }
+
+    /** Ensures exactly one selected company holds this tariff, whatever is already stored. */
+    private suspend fun useCompany(tariff: com.taxiinspector.ride.Tariff, name: String = "City Taxi") {
+        val existing = repository.observeCompanies().first().firstOrNull { it.name == name }
+        val id = if (existing == null) {
+            repository.createCompany(name, tariff)
+            repository.observeCompanies().first().single { it.name == name }.id
+        } else {
+            repository.updateCompany(existing.id, name, tariff)
+            existing.id
+        }
+        repository.selectCompany(id)
     }
 }

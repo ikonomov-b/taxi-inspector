@@ -25,6 +25,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import com.taxiinspector.R
+import com.taxiinspector.ui.DestinationHeader
 
 /** A route-free view of one saved summary and its locked tariff. */
 @Composable
@@ -88,6 +89,11 @@ private fun RideDetails(
         color = MaterialTheme.colorScheme.onSurfaceVariant,
     )
     Text(text = ride.total, style = MaterialTheme.typography.headlineSmall)
+    DetailRow(
+        stringResource(R.string.ride_detail_company),
+        // The app never invents a name for a ride recorded before companies existed.
+        ride.companyName ?: stringResource(R.string.company_legacy_label),
+    )
     DetailRow(stringResource(R.string.ride_detail_status), stringResource(ride.status.labelRes()))
     DetailRow(stringResource(R.string.ride_detail_ended), ride.endedAt)
     DetailRow(

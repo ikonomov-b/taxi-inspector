@@ -21,6 +21,12 @@ abstract class RideDao {
     @Query("SELECT * FROM taxi_company WHERE id = :id")
     abstract suspend fun company(id: String): TaxiCompanyEntity?
 
+    @Query("SELECT * FROM taxi_company WHERE nameKey = :nameKey")
+    abstract suspend fun companyByNameKey(nameKey: String): TaxiCompanyEntity?
+
+    @Query("SELECT COUNT(*) FROM taxi_company")
+    abstract suspend fun companyCount(): Int
+
     /**
      * One query is safe here because a one-shot read needs no invalidation tracking; the
      * observable form is composed from the two single-table flows instead.
@@ -40,6 +46,9 @@ abstract class RideDao {
 
     @Update
     abstract suspend fun updateCompany(company: TaxiCompanyEntity)
+
+    @Query("DELETE FROM taxi_company WHERE id = :id")
+    abstract suspend fun deleteCompanyRow(id: String)
 
     @Query("SELECT * FROM app_settings WHERE id = 1")
     abstract fun observeSettings(): Flow<AppSettingsEntity?>
@@ -97,6 +106,60 @@ abstract class RideDao {
         insertSummary(summary)
         deleteActiveRide(summary.id)
         trimHistoryToTen()
+    }
+
+    /**
+     * Every guard runs inside the transaction so a concurrent add cannot slip past the
+     * ten-company limit or the duplicate-name rule between the check and the insert.
+     */
+    @Transaction
+    open suspend fun createCompany(company: TaxiCompanyEntity): CompanySaveResult {
+        if (activeRide() != null) return CompanySaveResult.RideActive
+        val existingCount = companyCount()
+        if (existingCount >= TaxiCompany.MAX_COMPANIES) return CompanySaveResult.LimitReached
+        if (companyByNameKey(company.nameKey) != null) return CompanySaveResult.DuplicateName
+
+        insertCompany(company)
+        // Only the very first company selects itself. Adding one after deleting the selected
+        // company must not silently choose for the user; the product rule makes them pick.
+        if (existingCount == 0) {
+            upsertSettings(AppSettingsEntity(selectedCompanyId = company.id))
+        }
+        return CompanySaveResult.Saved
+    }
+
+    @Transaction
+    open suspend fun updateCompanyDetails(company: TaxiCompanyEntity): CompanySaveResult {
+        if (activeRide() != null) return CompanySaveResult.RideActive
+        if (company(company.id) == null) return CompanySaveResult.CompanyMissing
+        val sameName = companyByNameKey(company.nameKey)
+        if (sameName != null && sameName.id != company.id) return CompanySaveResult.DuplicateName
+
+        updateCompany(company)
+        return CompanySaveResult.Saved
+    }
+
+    @Transaction
+    open suspend fun selectCompany(id: String): CompanyChangeResult {
+        if (activeRide() != null) return CompanyChangeResult.RideActive
+        if (company(id) == null) return CompanyChangeResult.CompanyMissing
+
+        upsertSettings(AppSettingsEntity(selectedCompanyId = id))
+        return CompanyChangeResult.Done
+    }
+
+    /** Deleting the selected company clears the selection, so Start stays unavailable. */
+    @Transaction
+    open suspend fun deleteCompany(id: String): CompanyChangeResult {
+        if (activeRide() != null) return CompanyChangeResult.RideActive
+        if (company(id) == null) return CompanyChangeResult.CompanyMissing
+
+        val wasSelected = settings()?.selectedCompanyId == id
+        deleteCompanyRow(id)
+        if (wasSelected) {
+            upsertSettings(AppSettingsEntity(selectedCompanyId = null))
+        }
+        return CompanyChangeResult.Done
     }
 
     /**

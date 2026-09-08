@@ -1,6 +1,7 @@
 package com.taxiinspector.ui.meter
 
-import com.taxiinspector.ui.tariff.TariffSummary
+import com.taxiinspector.ui.TariffSummary
+import com.taxiinspector.ui.companies.CompanySummary
 
 /**
  * Everything the meter screen renders. It holds formatted display values only: never a
@@ -8,15 +9,31 @@ import com.taxiinspector.ui.tariff.TariffSummary
  */
 data class MeterUiState(
     val presentation: MeterPresentation = MeterPresentation.EMPTY,
-    /** The locked tariff while a ride runs, otherwise the currently editable one. */
-    val savedTariff: TariffSummary? = null,
-    val status: MeterStatus = MeterStatus.TariffNeeded,
+    /** During a ride this is its locked snapshot; before one, the durable selection. */
+    val company: MeterCompany? = null,
+    /** The selectable profiles. Empty during a ride, which cannot change its company. */
+    val companies: List<CompanySummary> = emptyList(),
+    /** Which of [companies] the selector marks; null during a ride and before any selection. */
+    val selectedCompanyId: String? = null,
+    val status: MeterStatus = MeterStatus.CompanyNeeded,
     val canStart: Boolean = false,
-    /** False while any ride is active, because a ride locks its tariff at Start. */
-    val canEditTariff: Boolean = true,
+    /** False while any ride is active, because a ride locks its company at Start. */
+    val canManageCompanies: Boolean = true,
+    val isCompanySelectorVisible: Boolean = false,
     val isDiscardConfirmationVisible: Boolean = false,
     val recovery: MeterRecovery? = null,
     val message: MeterMessage? = null,
+)
+
+/**
+ * What the meter shows beneath the face. While a ride is active this is the ride's own locked
+ * snapshot rather than the current selection, so a later selection change cannot appear to
+ * rewrite a running ride.
+ */
+data class MeterCompany(
+    /** Null only for a ride locked before companies existed; the screen labels that case. */
+    val name: String?,
+    val tariff: TariffSummary,
 )
 
 /** Pre-formatted meter-face values in the user's own tariff unit; no currency label. */
@@ -52,7 +69,7 @@ enum class MeterPhaseLabel { Ready, Running, Paused, Interrupted }
  * design document's status table. It is never rendered inside the meter face.
  */
 enum class MeterStatus {
-    TariffNeeded,
+    CompanyNeeded,
     ReadyToStart,
     PermissionNeeded,
     NotificationsNeeded,
@@ -69,4 +86,4 @@ enum class MeterStatus {
 enum class MeterRecovery { GrantPreciseLocation, GrantNotifications, EnableGps }
 
 /** A transient, one-shot notice; it never carries fare state. */
-enum class MeterMessage { TariffNeededToStart }
+enum class MeterMessage { CompanyNeededToStart }

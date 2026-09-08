@@ -58,7 +58,7 @@ class RideTrackingControllerTest {
 
     @Test
     fun startRejectsEveryMissingPrerequisiteWithoutCreatingAnActiveRide() = runBlocking {
-        repository.saveTariff(tariff())
+        useCompany(tariff())
         val scenarios = listOf(
             Scenario(false, true, true, StartRejection.PreciseLocationMissing),
             Scenario(true, false, true, StartRejection.GpsDisabled),
@@ -87,7 +87,7 @@ class RideTrackingControllerTest {
 
     @Test
     fun pausePersistsBeforeStoppingAndCancelsLocation() = runBlocking {
-        repository.saveTariff(tariff())
+        useCompany(tariff())
         val locationClient = FakeLocationClient()
         val host = FakeTrackingHost(repository)
         val candidate = createController(locationClient = locationClient, host = host)
@@ -111,7 +111,7 @@ class RideTrackingControllerTest {
 
     @Test
     fun stopIsSerializedAheadOfALaterLocationAndSavesExactlyOnce() = runBlocking {
-        repository.saveTariff(tariff())
+        useCompany(tariff())
         val locationClient = FakeLocationClient()
         val host = FakeTrackingHost()
         val candidate = createController(locationClient = locationClient, host = host)
@@ -136,7 +136,7 @@ class RideTrackingControllerTest {
 
     @Test
     fun permissionLossFreezesAndPersistsARecoverablePausedRide() = runBlocking {
-        repository.saveTariff(tariff())
+        useCompany(tariff())
         val locationClient = FakeLocationClient()
         val host = FakeTrackingHost()
         val candidate = createController(locationClient = locationClient, host = host)
@@ -160,7 +160,7 @@ class RideTrackingControllerTest {
 
     @Test
     fun resumeUsesTheLockedPausedRideAndDiscardDeletesItWithoutHistory() = runBlocking {
-        repository.saveTariff(tariff())
+        useCompany(tariff())
         val started = repository.startRide("paused-ride", 100)
         val withBaseline = RideEngine.reduce(
             started,
@@ -188,7 +188,7 @@ class RideTrackingControllerTest {
 
     @Test
     fun stopCanSaveAPersistedPausedRideWithoutResumingGps() = runBlocking {
-        repository.saveTariff(tariff())
+        useCompany(tariff())
         val started = repository.startRide("paused-stop", 100)
         repository.updateActiveRide(RideEngine.reduce(started, RideInput.Pause))
         val locationClient = FakeLocationClient()
@@ -207,7 +207,7 @@ class RideTrackingControllerTest {
 
     @Test
     fun meaningfulNotificationUpdatesAreBoundedToOncePerSecond() = runBlocking {
-        repository.saveTariff(tariff())
+        useCompany(tariff())
         val locationClient = FakeLocationClient()
         val host = FakeTrackingHost()
         val clock = FakeClock(elapsed = 1_000)
@@ -234,7 +234,7 @@ class RideTrackingControllerTest {
 
     @Test
     fun unownedRunningRideBecomesInterruptedOnceWhileLiveOwnershipPreservesIt() = runBlocking {
-        repository.saveTariff(tariff())
+        useCompany(tariff())
         val locationClient = FakeLocationClient()
         val candidate = createController(locationClient = locationClient)
         candidate.dispatch(RideCommand.Start)
@@ -392,5 +392,18 @@ class RideTrackingControllerTest {
         suspend fun awaitStop() {
             withTimeout(3_000) { stopped.await() }
         }
+    }
+
+    /** Ensures exactly one selected company holds this tariff, whatever is already stored. */
+    private suspend fun useCompany(tariff: Tariff, name: String = "City Taxi") {
+        val existing = repository.observeCompanies().first().firstOrNull { it.name == name }
+        val id = if (existing == null) {
+            repository.createCompany(name, tariff)
+            repository.observeCompanies().first().single { it.name == name }.id
+        } else {
+            repository.updateCompany(existing.id, name, tariff)
+            existing.id
+        }
+        repository.selectCompany(id)
     }
 }
