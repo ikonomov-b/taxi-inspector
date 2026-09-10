@@ -205,17 +205,9 @@ abstract class RideDao {
         val current = activeRide() ?: return null
         if (current.id != id || current.phase != RidePhase.Running.name) return current
 
-        val interrupted = current.toDomain().copy(
-            phase = RidePhase.PendingInterrupted,
-            trackingStatus = TrackingStatus.GpsLost,
-            lastAcceptedFixElapsedMillis = null,
-            lastFreshBillableReceivedElapsedMillis = null,
-            lastBillablePoint = null,
-            lastSpeedMetersPerSecond = null,
-            lastSpeedReceivedElapsedMillis = null,
-            lowSpeedCandidateMillis = 0,
-            highSpeedCandidateMillis = 0,
-        ).toEntity()
+        // The engine owns the transition: it commits the hold observed before the process died,
+        // which a field-by-field copy here would silently drop.
+        val interrupted = RideEngine.interrupt(current.toDomain()).toEntity()
         upsertActiveRide(interrupted)
         return interrupted
     }

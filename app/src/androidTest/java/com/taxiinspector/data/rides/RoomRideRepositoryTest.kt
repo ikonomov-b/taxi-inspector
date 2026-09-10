@@ -127,33 +127,60 @@ class RoomRideRepositoryTest {
     }
 
     @Test
+    fun interruptingARunningRideKeepsTheTimeItHadAlreadyBilled() = runBlocking {
+        saveCompany("City Taxi", tariff("1", "2", "3"))
+        val running = repository.startRide("interrupted", 1_000)
+        repository.updateActiveRide(
+            running.copy(distanceMeters = BigDecimal("250"), timeTariffMillis = 42_000),
+        )
+
+        val interrupted = requireNotNull(repository.markRunningRideInterrupted("interrupted"))
+
+        assertEquals(RidePhase.PendingInterrupted, interrupted.phase)
+        assertEquals(TrackingStatus.GpsLost, interrupted.trackingStatus)
+        assertEquals(42_000L, interrupted.billedTimeMillis)
+        assertEquals("250", interrupted.distanceMeters.toPlainString())
+        assertNull(interrupted.lastBillablePoint)
+    }
+
+    @Test
     fun companySelectionAndCompleteActiveSnapshotSurviveDatabaseRecreation() = runBlocking {
         val savedTariff = tariff("1.250000", "2.75", "0.500001")
         val companyId = saveCompany("City Taxi", savedTariff)
-        val expected = repository.startRide("recreated", 1_000).copy(
+        val baseline = LocationSample(
+            latitude = 42.6977,
+            longitude = 23.3219,
+            accuracyMeters = 7.5,
+            provider = LocationSample.Provider.Gps,
+            speedMetersPerSecond = 0.25,
+            fixElapsedMillis = 8_500,
+            receivedElapsedMillis = 8_750,
+        )
+        val stored = repository.startRide("recreated", 1_000).copy(
             phase = RidePhase.Paused,
             trackingStatus = TrackingStatus.Weak,
             distanceMeters = BigDecimal("123.450"),
-            idleMillis = 6_789,
+            timeTariffMillis = 6_789,
+            provisionalTimeMillis = 1_211,
             motionState = MotionState.Idle,
             lastTickElapsedMillis = 9_000,
-            lastAcceptedFixElapsedMillis = 8_500,
+            lastAcceptedFix = baseline.copy(fixElapsedMillis = 8_900),
             lastFreshBillableReceivedElapsedMillis = 8_750,
-            lastBillablePoint = LocationSample(
-                latitude = 42.6977,
-                longitude = 23.3219,
-                accuracyMeters = 7.5,
-                provider = LocationSample.Provider.Gps,
-                speedMetersPerSecond = 0.25,
-                fixElapsedMillis = 8_500,
-                receivedElapsedMillis = 8_750,
-            ),
-            lastSpeedMetersPerSecond = 0.25,
-            lastSpeedReceivedElapsedMillis = 8_750,
-            lowSpeedCandidateMillis = 4_000,
-            highSpeedCandidateMillis = 0,
+            lastBillablePoint = baseline,
+            pendingOutlier = baseline.copy(fixElapsedMillis = 8_950),
+            outlierStreak = 1,
         )
-        repository.updateActiveRide(expected)
+        // The stored row carries one time figure, so the observed hold is committed into it, and
+        // the transient plausibility state is not stored at all: a baseline restored without the
+        // fix clock it was measured against must not be able to form a chord across the gap.
+        val expected = stored.copy(
+            timeTariffMillis = 8_000,
+            provisionalTimeMillis = 0,
+            lastAcceptedFix = null,
+            pendingOutlier = null,
+            outlierStreak = 0,
+        )
+        repository.updateActiveRide(stored)
 
         database.close()
         openDatabase()

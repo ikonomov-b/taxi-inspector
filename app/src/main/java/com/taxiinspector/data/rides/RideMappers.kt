@@ -40,11 +40,14 @@ internal fun ActiveRide.toEntity(): ActiveRideEntity = ActiveRideEntity(
     phase = phase.name,
     trackingStatus = trackingStatus.name,
     distanceMeters = distanceMeters.toPlainString(),
-    idleMillis = idleMillis,
+    // The column keeps its version-1 name and holds committed plus provisional time together:
+    // every path that persists a ride has either committed the hold or is storing a confirmed
+    // total, so the sum is exact and no migration is needed.
+    idleMillis = billedTimeMillis,
     motionState = motionState.name,
     startedElapsedMillis = startedElapsedMillis,
     lastTickElapsedMillis = lastTickElapsedMillis,
-    lastAcceptedFixElapsedMillis = lastAcceptedFixElapsedMillis,
+    lastAcceptedFixElapsedMillis = lastAcceptedFix?.fixElapsedMillis,
     lastFreshBillableReceivedElapsedMillis = lastFreshBillableReceivedElapsedMillis,
     pointLatitude = lastBillablePoint?.latitude,
     pointLongitude = lastBillablePoint?.longitude,
@@ -53,10 +56,11 @@ internal fun ActiveRide.toEntity(): ActiveRideEntity = ActiveRideEntity(
     pointSpeedMetersPerSecond = lastBillablePoint?.speedMetersPerSecond,
     pointFixElapsedMillis = lastBillablePoint?.fixElapsedMillis,
     pointReceivedElapsedMillis = lastBillablePoint?.receivedElapsedMillis,
-    lastSpeedMetersPerSecond = lastSpeedMetersPerSecond,
-    lastSpeedReceivedElapsedMillis = lastSpeedReceivedElapsedMillis,
-    lowSpeedCandidateMillis = lowSpeedCandidateMillis,
-    highSpeedCandidateMillis = highSpeedCandidateMillis,
+    // Speed hysteresis is gone; the columns stay so the schema does not change.
+    lastSpeedMetersPerSecond = null,
+    lastSpeedReceivedElapsedMillis = null,
+    lowSpeedCandidateMillis = 0,
+    highSpeedCandidateMillis = 0,
 )
 
 internal fun ActiveRideEntity.toDomain(): ActiveRide = ActiveRide(
@@ -66,17 +70,19 @@ internal fun ActiveRideEntity.toDomain(): ActiveRide = ActiveRide(
     phase = RidePhase.valueOf(phase),
     trackingStatus = TrackingStatus.valueOf(trackingStatus),
     distanceMeters = BigDecimal(distanceMeters),
-    idleMillis = idleMillis,
+    timeTariffMillis = idleMillis,
+    provisionalTimeMillis = 0,
     motionState = MotionState.valueOf(motionState),
     startedElapsedMillis = startedElapsedMillis,
     lastTickElapsedMillis = lastTickElapsedMillis,
-    lastAcceptedFixElapsedMillis = lastAcceptedFixElapsedMillis,
+    // A restored baseline has no fix clock to measure continuity or plausibility against, and
+    // the engine treats a point without one exactly like no baseline at all, so a stale point
+    // can never form a chord across a process death.
+    lastAcceptedFix = null,
     lastFreshBillableReceivedElapsedMillis = lastFreshBillableReceivedElapsedMillis,
     lastBillablePoint = pointOrNull(),
-    lastSpeedMetersPerSecond = lastSpeedMetersPerSecond,
-    lastSpeedReceivedElapsedMillis = lastSpeedReceivedElapsedMillis,
-    lowSpeedCandidateMillis = lowSpeedCandidateMillis,
-    highSpeedCandidateMillis = highSpeedCandidateMillis,
+    pendingOutlier = null,
+    outlierStreak = 0,
 )
 
 internal fun SavedRideSummary.toEntity(): RideSummaryEntity = RideSummaryEntity(
@@ -87,7 +93,7 @@ internal fun SavedRideSummary.toEntity(): RideSummaryEntity = RideSummaryEntity(
     perMinuteStillRate = summary.tariff.perMinuteStillRate.value.toPlainString(),
     total = summary.total.value.toPlainString(),
     distanceMeters = summary.distanceMeters.toPlainString(),
-    idleMillis = summary.idleMillis,
+    idleMillis = summary.timeTariffMillis,
     elapsedMillis = summary.elapsedMillis,
     endedElapsedMillis = summary.endedElapsedMillis,
     endedAtUtcMillis = endedAtUtcMillis,
@@ -101,7 +107,7 @@ internal fun RideSummaryEntity.toDomain(): SavedRideSummary = SavedRideSummary(
         tariff = Tariff(initialTax.toDecimalAmount(), perKmRate.toDecimalAmount(), perMinuteStillRate.toDecimalAmount()),
         total = total.toDecimalAmount(),
         distanceMeters = BigDecimal(distanceMeters),
-        idleMillis = idleMillis,
+        timeTariffMillis = idleMillis,
         elapsedMillis = elapsedMillis,
         endedElapsedMillis = endedElapsedMillis,
         status = RideSummary.Status.valueOf(status),

@@ -125,7 +125,7 @@ class TaxiInspectorMigrationTest {
             assertEquals("8.5", active.tariff.perKmRate.value.toPlainString())
             assertEquals("0.4", active.tariff.perMinuteStillRate.value.toPlainString())
             assertEquals("1234.5", active.distanceMeters.toPlainString())
-            assertEquals(7_000L, active.idleMillis)
+            assertEquals(7_000L, active.timeTariffMillis)
             val point = requireNotNull(active.lastBillablePoint)
             assertEquals(42.6977, point.latitude, 0.0)
             assertEquals(4.5, point.accuracyMeters, 0.0)

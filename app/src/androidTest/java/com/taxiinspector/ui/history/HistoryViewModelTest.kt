@@ -53,7 +53,7 @@ class HistoryViewModelTest {
             status = RideSummary.Status.Interrupted,
             tariff = tariff("1", "2", "0.5"),
             distanceMeters = "750",
-            idleMillis = 30_000,
+            timeTariffMillis = 30_000,
             elapsedMillis = 90_000,
         )
         saveRide(
@@ -62,7 +62,7 @@ class HistoryViewModelTest {
             status = RideSummary.Status.Completed,
             tariff = tariff("2.4", "1.2", "0.35"),
             distanceMeters = "2500",
-            idleMillis = 180_000,
+            timeTariffMillis = 180_000,
             elapsedMillis = 3_849_000,
         )
 
@@ -112,13 +112,13 @@ class HistoryViewModelTest {
         status: RideSummary.Status = RideSummary.Status.Completed,
         tariff: Tariff,
         distanceMeters: String = "0",
-        idleMillis: Long = 0,
+        timeTariffMillis: Long = 0,
         elapsedMillis: Long = 1_000,
     ) {
         useCompany(tariff)
         val active = repository.startRide(id, 1_000).copy(
             distanceMeters = BigDecimal(distanceMeters),
-            idleMillis = idleMillis,
+            timeTariffMillis = timeTariffMillis,
         )
         val summary = RideEngine.finish(active, 1_000 + elapsedMillis)
         when (status) {

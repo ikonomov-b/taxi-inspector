@@ -1,29 +1,46 @@
 package com.taxiinspector.ride
 
-import com.taxiinspector.core.decimal.DecimalAmount
 import java.math.BigDecimal
-import kotlin.math.asin
-import kotlin.math.cos
-import kotlin.math.pow
-import kotlin.math.sin
-import kotlin.math.sqrt
+import kotlin.math.min
 
 /**
- * Pure active-ride reducer. Android adapters decide how samples arrive; this class
- * decides whether a sample may affect distance, waiting time, or visible status.
+ * Pure active-ride reducer. Android adapters decide how samples arrive; this class decides
+ * whether a sample may affect distance, tariff time, or visible status.
+ *
+ * Billing follows EU taximeter calculation mode S. Each closed interval between two billing
+ * quality fixes is attributed whole, to whichever of the two tariffs earns more over it. That is
+ * exactly mode S when the speed stays on one side of the tariff's cross-over within the
+ * interval, and a lower bound otherwise, so the app reads at or below an approved meter. No
+ * speed measurement and no hysteresis take part: the comparison is between two fares.
+ *
+ * A fix that cannot bill is a non-observation, not a boundary. The chord between two billing
+ * quality fixes is a lower bound on the path whatever happened between them, so a Weak fix
+ * clears nothing and the next good fix settles the whole held interval at once. Only the
+ * fifteen-second loss rule ends an interval unbilled.
  */
 object RideEngine {
     private const val BILLING_ACCURACY_METERS = 20.0
-    private const val WEAK_ACCURACY_METERS = 60.0
     private const val MINIMUM_SIGNIFICANT_MOVEMENT_METERS = 5.0
     private const val DUAL_BAND_SIGNIFICANT_MOVEMENT_METERS = 2.5
-    private const val MAXIMUM_SEGMENT_METERS = 1_500.0
     private const val FRESH_SAMPLE_MILLIS = 5_000L
     private const val GPS_LOSS_MILLIS = 15_000L
-    private const val IDLE_ENTRY_MILLIS = 5_000L
-    private const val MOVING_EXIT_MILLIS = 3_000L
-    private const val IDLE_ENTRY_SPEED = 0.8
-    private const val MOVING_EXIT_SPEED = 1.3
+
+    /** No road vehicle exceeds this, so a faster implied speed is a positioning error. */
+    private const val MAX_PLAUSIBLE_SPEED = 55.0
+
+    /** Headroom over a reported speed and its own uncertainty before a fix is doubted. */
+    private const val SPEED_MARGIN = 15.0
+
+    /** Consecutive implausible fixes after which the receiver, not the position, is doubted. */
+    private const val OUTLIER_STREAK_LIMIT = 3
+
+    private val LABEL_FALLBACK_METERS = BigDecimal.valueOf(BILLING_ACCURACY_METERS)
+
+    /** Which tariff wins a closed interval. */
+    enum class Attribution { Distance, Time }
+
+    /** The new state, plus what the engine did and why, for the debug ride trace. */
+    data class Step(val ride: ActiveRide, val decision: RideDecision?)
 
     /** Locks the company's name and exact tariff together, so neither can be taken from elsewhere. */
     fun start(id: String, company: TaxiCompany, nowElapsedMillis: Long): ActiveRide = ActiveRide(
@@ -33,26 +50,26 @@ object RideEngine {
         phase = RidePhase.Running,
         trackingStatus = TrackingStatus.Searching,
         distanceMeters = BigDecimal.ZERO,
-        idleMillis = 0,
-        motionState = MotionState.Moving,
+        timeTariffMillis = 0,
+        provisionalTimeMillis = 0,
+        motionState = MotionState.Idle,
         startedElapsedMillis = nowElapsedMillis,
         lastTickElapsedMillis = nowElapsedMillis,
-        lastAcceptedFixElapsedMillis = null,
+        lastAcceptedFix = null,
         lastFreshBillableReceivedElapsedMillis = null,
         lastBillablePoint = null,
-        lastSpeedMetersPerSecond = null,
-        lastSpeedReceivedElapsedMillis = null,
-        lowSpeedCandidateMillis = 0,
-        highSpeedCandidateMillis = 0,
+        pendingOutlier = null,
+        outlierStreak = 0,
     )
 
-    fun reduce(ride: ActiveRide, input: RideInput): ActiveRide = when (input) {
-        RideInput.Pause -> pause(ride)
-        is RideInput.Resume -> resume(ride, input.nowElapsedMillis)
+    fun reduce(ride: ActiveRide, input: RideInput): ActiveRide = step(ride, input).ride
+
+    fun step(ride: ActiveRide, input: RideInput): Step = when (input) {
+        RideInput.Pause -> Step(pause(ride), null)
+        is RideInput.Resume -> Step(resume(ride, input.nowElapsedMillis), null)
         is RideInput.LocationReceived -> onLocation(ride, input.sample, input.nowElapsedMillis)
         is RideInput.Tick -> onTick(ride, input.nowElapsedMillis)
-        is RideInput.GpsTimedOut -> timeout(ride, input.nowElapsedMillis)
-        RideInput.PermissionRevoked -> permissionRevoked(ride)
+        RideInput.PermissionRevoked -> Step(permissionRevoked(ride), null)
     }
 
     fun finish(ride: ActiveRide, endedElapsedMillis: Long): RideSummary {
@@ -61,21 +78,269 @@ object RideEngine {
             id = ride.id,
             companyName = ride.companyName,
             tariff = ride.tariff,
-            total = FareCalculator.total(ride.tariff, ride.distanceMeters, ride.idleMillis),
+            total = FareCalculator.total(ride.tariff, ride.distanceMeters, ride.billedTimeMillis),
             distanceMeters = ride.distanceMeters,
-            idleMillis = ride.idleMillis,
+            timeTariffMillis = ride.billedTimeMillis,
             elapsedMillis = endedElapsedMillis - ride.startedElapsedMillis,
             endedElapsedMillis = endedElapsedMillis,
             status = RideSummary.Status.Completed,
         )
     }
 
+    /**
+     * Freezes a ride whose owning process died. The observed hold is committed here rather than
+     * copied field by field elsewhere, so an interruption cannot silently drop billed time.
+     */
+    fun interrupt(ride: ActiveRide): ActiveRide = ride.copy(
+        phase = RidePhase.PendingInterrupted,
+        trackingStatus = TrackingStatus.GpsLost,
+        timeTariffMillis = ride.billedTimeMillis,
+        provisionalTimeMillis = 0,
+        lastAcceptedFix = null,
+        lastFreshBillableReceivedElapsedMillis = null,
+        lastBillablePoint = null,
+        pendingOutlier = null,
+        outlierStreak = 0,
+    )
+
+    /**
+     * Mode S over one closed interval: the tariff that earns more takes the whole interval.
+     * An exact tie goes to distance, which is the direction a meter switches at its cross-over.
+     */
+    internal fun reconcile(tariff: Tariff, meters: BigDecimal, millis: Long): Attribution =
+        if (FareCalculator.compareDistanceToTimeFare(tariff, meters, millis) >= 0) {
+            Attribution.Distance
+        } else {
+            Attribution.Time
+        }
+
+    private fun onLocation(
+        ride: ActiveRide,
+        sample: LocationSample,
+        nowElapsedMillis: Long,
+    ): Step {
+        if (ride.phase != RidePhase.Running) return Step(ride, null)
+
+        rejection(sample, nowElapsedMillis)?.let { reason ->
+            // A non-observation. The baseline is kept, the provisional hold does not grow, and
+            // the loss timer is not refreshed, so "GPS weak -- fare frozen" stays literally true
+            // and a good fix within fifteen seconds still bridges the whole interval.
+            return Step(markWeak(ride, nowElapsedMillis), RideDecision(reason))
+        }
+
+        val previousFix = ride.lastAcceptedFix
+        if (previousFix != null && sample.fixElapsedMillis <= previousFix.fixElapsedMillis) {
+            return Step(ride, RideDecision(RideDecision.Reason.RejectedOutOfOrder))
+        }
+
+        // Exactly fifteen seconds is already GPS Lost. Reset before accepting the returning fix
+        // so location-before-tick and tick-before-location produce the same state and fare.
+        val lost = previousFix != null &&
+            sample.fixElapsedMillis - previousFix.fixElapsedMillis >= GPS_LOSS_MILLIS
+        val current = if (lost) markGpsLost(ride, nowElapsedMillis) else ride
+        val tickElapsedMillis = if (current.trackingStatus != TrackingStatus.Good) {
+            maxOf(current.lastTickElapsedMillis, nowElapsedMillis)
+        } else {
+            current.lastTickElapsedMillis
+        }
+
+        fun ActiveRide.accepted(): ActiveRide = copy(
+            trackingStatus = TrackingStatus.Good,
+            lastFreshBillableReceivedElapsedMillis = nowElapsedMillis,
+            lastTickElapsedMillis = tickElapsedMillis,
+        )
+
+        val baseline = current.lastBillablePoint
+        val acceptedFix = current.lastAcceptedFix
+        if (baseline == null || acceptedFix == null) {
+            // Searching, returning after a loss, or a snapshot reloaded without its fix clock:
+            // a chord needs two fixes this ride actually observed.
+            return Step(
+                current.accepted().copy(
+                    provisionalTimeMillis = 0,
+                    lastBillablePoint = sample,
+                    lastAcceptedFix = sample,
+                    pendingOutlier = null,
+                    outlierStreak = 0,
+                    motionState = MotionState.Idle,
+                ),
+                RideDecision(RideDecision.Reason.Seeded),
+            )
+        }
+
+        val excessSpeed = excessSpeedMetersPerSecond(acceptedFix, sample)
+        if (excessSpeed > plausibilityBound(sample)) return outlier(
+            current,
+            sample,
+            excessSpeed,
+        ) { it.accepted() }
+
+        val chordMeters = Geodesic.distanceMeters(baseline, sample)
+        val baselineAgeMillis = sample.fixElapsedMillis - baseline.fixElapsedMillis
+        val significantMeters = maxOf(
+            significantMovementFloorMeters(baseline, sample),
+            baseline.accuracyMeters,
+            sample.accuracyMeters,
+        )
+
+        if (chordMeters < significantMeters) {
+            // Held inside the deadband: the position is unresolved but the wait is observed.
+            // Accruing it from the fix clock, not from ticks, keeps it at or below the interval
+            // the next close attributes, so no ordering of ticks and fixes can lower a total.
+            return Step(
+                current.accepted().copy(
+                    lastAcceptedFix = sample,
+                    pendingOutlier = null,
+                    outlierStreak = 0,
+                    provisionalTimeMillis = baselineAgeMillis,
+                    motionState = labelOnHold(
+                        current.motionState,
+                        baselineAgeMillis,
+                        significantMeters,
+                        sample,
+                        current.tariff,
+                    ),
+                ),
+                RideDecision(
+                    reason = RideDecision.Reason.Held,
+                    chordMeters = chordMeters,
+                    significantMeters = significantMeters,
+                    baselineAgeMillis = baselineAgeMillis,
+                    excessSpeedMetersPerSecond = excessSpeed,
+                    deltaMillis = baselineAgeMillis,
+                ),
+            )
+        }
+
+        return when (reconcile(current.tariff, BigDecimal.valueOf(chordMeters), baselineAgeMillis)) {
+            Attribution.Distance -> Step(
+                current.accepted().copy(
+                    distanceMeters = current.distanceMeters.add(BigDecimal.valueOf(chordMeters)),
+                    provisionalTimeMillis = 0,
+                    lastBillablePoint = sample,
+                    lastAcceptedFix = sample,
+                    pendingOutlier = null,
+                    outlierStreak = 0,
+                    motionState = MotionState.Moving,
+                ),
+                RideDecision(
+                    reason = RideDecision.Reason.ClosedDistance,
+                    chordMeters = chordMeters,
+                    significantMeters = significantMeters,
+                    baselineAgeMillis = baselineAgeMillis,
+                    excessSpeedMetersPerSecond = excessSpeed,
+                    billedAs = RideDecision.BilledAs.Distance,
+                ),
+            )
+
+            Attribution.Time -> Step(
+                current.accepted().copy(
+                    timeTariffMillis = current.timeTariffMillis + baselineAgeMillis,
+                    provisionalTimeMillis = 0,
+                    lastBillablePoint = sample,
+                    lastAcceptedFix = sample,
+                    pendingOutlier = null,
+                    outlierStreak = 0,
+                    motionState = labelOnTimeClose(acceptedFix, sample, current.tariff),
+                ),
+                RideDecision(
+                    reason = RideDecision.Reason.ClosedTime,
+                    chordMeters = chordMeters,
+                    significantMeters = significantMeters,
+                    baselineAgeMillis = baselineAgeMillis,
+                    excessSpeedMetersPerSecond = excessSpeed,
+                    billedAs = RideDecision.BilledAs.Time,
+                    deltaMillis = baselineAgeMillis,
+                ),
+            )
+        }
+    }
+
+    /**
+     * An implausible fix moves nothing until a second fix agrees with it, so a multipath jump and
+     * the return from it are never both billed. A genuine relocation is confirmed either by a
+     * second mutually plausible fix or by a streak, which bounds the freeze to three seconds at
+     * 1 Hz. The hold observed before the jump is committed; the jump itself is never billed.
+     */
+    private fun outlier(
+        ride: ActiveRide,
+        sample: LocationSample,
+        excessSpeed: Double,
+        accept: (ActiveRide) -> ActiveRide,
+    ): Step {
+        val streak = ride.outlierStreak + 1
+        val confirmedByPendingFix = ride.pendingOutlier?.let {
+            excessSpeedMetersPerSecond(it, sample) <= plausibilityBound(sample)
+        } == true
+
+        return if (confirmedByPendingFix || streak >= OUTLIER_STREAK_LIMIT) {
+            Step(
+                accept(ride).copy(
+                    timeTariffMillis = ride.billedTimeMillis,
+                    provisionalTimeMillis = 0,
+                    lastBillablePoint = sample,
+                    lastAcceptedFix = sample,
+                    pendingOutlier = null,
+                    outlierStreak = 0,
+                    motionState = MotionState.Idle,
+                ),
+                RideDecision(
+                    reason = RideDecision.Reason.Relocated,
+                    excessSpeedMetersPerSecond = excessSpeed,
+                    deltaMillis = ride.provisionalTimeMillis,
+                ),
+            )
+        } else {
+            Step(
+                accept(ride).copy(pendingOutlier = sample, outlierStreak = streak),
+                RideDecision(
+                    reason = RideDecision.Reason.Outlier,
+                    excessSpeedMetersPerSecond = excessSpeed,
+                ),
+            )
+        }
+    }
+
+    private fun onTick(ride: ActiveRide, nowElapsedMillis: Long): Step {
+        if (ride.phase != RidePhase.Running || nowElapsedMillis <= ride.lastTickElapsedMillis) {
+            return Step(ride, null)
+        }
+        if (isGpsLost(ride, nowElapsedMillis)) {
+            return Step(
+                markGpsLost(ride, nowElapsedMillis),
+                RideDecision(
+                    reason = RideDecision.Reason.GpsLostReset,
+                    deltaMillis = ride.provisionalTimeMillis,
+                ),
+            )
+        }
+
+        // Ticks never bill. They only let the label fall back to Idle across a stretch with no
+        // billing quality fix at all, using the widest deadband as the distance it stands for.
+        val baseline = ride.lastBillablePoint
+        val label = if (
+            baseline != null &&
+            ride.motionState == MotionState.Moving &&
+            FareCalculator.compareDistanceToTimeFare(
+                ride.tariff,
+                LABEL_FALLBACK_METERS,
+                (nowElapsedMillis - baseline.fixElapsedMillis).coerceAtLeast(0),
+            ) < 0
+        ) {
+            MotionState.Idle
+        } else {
+            ride.motionState
+        }
+        return Step(ride.copy(lastTickElapsedMillis = nowElapsedMillis, motionState = label), null)
+    }
+
     private fun pause(ride: ActiveRide): ActiveRide = when (ride.phase) {
         RidePhase.Running -> ride.copy(
             phase = RidePhase.Paused,
-            lowSpeedCandidateMillis = 0,
-            highSpeedCandidateMillis = 0,
+            timeTariffMillis = ride.billedTimeMillis,
+            provisionalTimeMillis = 0,
         )
+
         else -> ride
     }
 
@@ -85,221 +350,143 @@ object RideEngine {
             phase = RidePhase.Running,
             trackingStatus = TrackingStatus.Searching,
             lastTickElapsedMillis = nowElapsedMillis,
-            lastAcceptedFixElapsedMillis = null,
+            provisionalTimeMillis = 0,
+            lastAcceptedFix = null,
             lastFreshBillableReceivedElapsedMillis = null,
             lastBillablePoint = null,
-            lastSpeedMetersPerSecond = null,
-            lastSpeedReceivedElapsedMillis = null,
-            lowSpeedCandidateMillis = 0,
-            highSpeedCandidateMillis = 0,
-            motionState = MotionState.Moving,
+            pendingOutlier = null,
+            outlierStreak = 0,
+            motionState = MotionState.Idle,
         )
     }
-
-    private fun onLocation(
-        ride: ActiveRide,
-        sample: LocationSample,
-        nowElapsedMillis: Long,
-    ): ActiveRide {
-        if (ride.phase != RidePhase.Running) return ride
-        // A synthetic fix must never reach the fare: this app's output is meant to be
-        // evidence, and a mock provider can manufacture any distance it likes.
-        if (sample.isMock) return markWeak(ride, nowElapsedMillis)
-        if (sample.provider != LocationSample.Provider.Gps || sample.accuracyMeters > WEAK_ACCURACY_METERS) {
-            return markWeak(ride, nowElapsedMillis)
-        }
-        if (nowElapsedMillis - sample.fixElapsedMillis !in 0..FRESH_SAMPLE_MILLIS) {
-            return markWeak(ride, nowElapsedMillis)
-        }
-        if (sample.accuracyMeters > BILLING_ACCURACY_METERS) {
-            return markWeak(ride, nowElapsedMillis)
-        }
-        if (ride.lastAcceptedFixElapsedMillis != null &&
-            sample.fixElapsedMillis <= ride.lastAcceptedFixElapsedMillis
-        ) {
-            return ride
-        }
-
-        val acceptedFixGapMillis = ride.lastAcceptedFixElapsedMillis?.let {
-            sample.fixElapsedMillis - it
-        }
-        // Exactly 15 seconds is already GPS Lost. Reset before accepting the returning fix so
-        // location-before-tick and tick-before-location produce the same state and fare.
-        val rideBeforeSample = if (
-            acceptedFixGapMillis != null && acceptedFixGapMillis >= GPS_LOSS_MILLIS
-        ) {
-            markGpsLost(ride, nowElapsedMillis)
-        } else {
-            ride
-        }
-        val previousBaseline = rideBeforeSample.lastBillablePoint
-        val baselineGapMillis = previousBaseline?.let {
-            sample.fixElapsedMillis - it.fixElapsedMillis
-        }
-        val segmentMeters = previousBaseline?.let { distanceBetweenMeters(it, sample) }
-        val canUseSegment = previousBaseline != null &&
-            acceptedFixGapMillis != null && acceptedFixGapMillis in 1 until GPS_LOSS_MILLIS &&
-            segmentMeters != null && segmentMeters <= MAXIMUM_SEGMENT_METERS
-        val significantMeters = previousBaseline?.let {
-            maxOf(significantMovementFloorMeters(it, sample), it.accuracyMeters, sample.accuracyMeters)
-        }
-        val isSignificantSegment = canUseSegment && segmentMeters!! >= significantMeters!!
-        // Distance and waiting time are mutually exclusive: a vehicle the engine considers
-        // Idle is billed for time, so its movement advances the baseline without billing.
-        val distanceToAdd = if (
-            isSignificantSegment && rideBeforeSample.motionState == MotionState.Moving
-        ) {
-            BigDecimal.valueOf(segmentMeters!!)
-        } else {
-            BigDecimal.ZERO
-        }
-
-        val canDeriveSpeed = previousBaseline != null &&
-            baselineGapMillis != null && baselineGapMillis in 1..FRESH_SAMPLE_MILLIS &&
-            segmentMeters != null
-        val derivedSpeed = if (canDeriveSpeed) {
-            segmentMeters!! / (baselineGapMillis!!.toDouble() / 1_000.0)
-        } else {
-            null
-        }
-        val usableSpeed = sample.trustedSpeedMetersPerSecond() ?: derivedSpeed
-        val nextBaseline = when {
-            previousBaseline == null -> sample
-            segmentMeters != null && segmentMeters > MAXIMUM_SEGMENT_METERS -> sample
-            // Advances on any significant segment, billed or not, so that leaving Idle
-            // never measures back across an interval that was already billed as waiting.
-            isSignificantSegment -> sample
-            else -> previousBaseline
-        }
-        val wasBillingFrozen = rideBeforeSample.trackingStatus != TrackingStatus.Good
-
-        return rideBeforeSample.copy(
-            trackingStatus = TrackingStatus.Good,
-            distanceMeters = rideBeforeSample.distanceMeters.add(distanceToAdd),
-            lastTickElapsedMillis = if (wasBillingFrozen) {
-                maxOf(rideBeforeSample.lastTickElapsedMillis, nowElapsedMillis)
-            } else {
-                rideBeforeSample.lastTickElapsedMillis
-            },
-            lastAcceptedFixElapsedMillis = sample.fixElapsedMillis,
-            lastFreshBillableReceivedElapsedMillis = nowElapsedMillis,
-            lastBillablePoint = nextBaseline,
-            lastSpeedMetersPerSecond = usableSpeed,
-            lastSpeedReceivedElapsedMillis = if (usableSpeed == null) null else nowElapsedMillis,
-        )
-    }
-
-    /**
-     * A Weak fix is an immediate billing boundary, not only a visible status change. Clear the
-     * held baseline so a later Good fix cannot bridge the uncertain interval, and clear speed
-     * eligibility/candidates so ticks cannot keep charging from an earlier trusted speed.
-     */
-    private fun markWeak(ride: ActiveRide, nowElapsedMillis: Long): ActiveRide = ride.copy(
-        trackingStatus = TrackingStatus.Weak,
-        lastTickElapsedMillis = maxOf(ride.lastTickElapsedMillis, nowElapsedMillis),
-        lastBillablePoint = null,
-        lastSpeedMetersPerSecond = null,
-        lastSpeedReceivedElapsedMillis = null,
-        lowSpeedCandidateMillis = 0,
-        highSpeedCandidateMillis = 0,
-    )
-
-    private fun onTick(ride: ActiveRide, nowElapsedMillis: Long): ActiveRide {
-        if (ride.phase != RidePhase.Running || nowElapsedMillis <= ride.lastTickElapsedMillis) return ride
-        if (isGpsLost(ride, nowElapsedMillis)) return markGpsLost(ride, nowElapsedMillis)
-
-        val elapsedMillis = nowElapsedMillis - ride.lastTickElapsedMillis
-        val speed = ride.lastSpeedMetersPerSecond
-        val speedFresh = ride.lastSpeedReceivedElapsedMillis?.let {
-            nowElapsedMillis - it <= FRESH_SAMPLE_MILLIS
-        } == true
-        if (speed == null || !speedFresh) {
-            return ride.copy(lastTickElapsedMillis = nowElapsedMillis)
-        }
-
-        return applySpeedInterval(ride, speed, elapsedMillis).copy(lastTickElapsedMillis = nowElapsedMillis)
-    }
-
-    private fun applySpeedInterval(
-        ride: ActiveRide,
-        speedMetersPerSecond: Double,
-        elapsedMillis: Long,
-    ): ActiveRide = when (ride.motionState) {
-        MotionState.Moving -> when {
-            speedMetersPerSecond <= IDLE_ENTRY_SPEED -> {
-                val candidate = ride.lowSpeedCandidateMillis + elapsedMillis
-                if (candidate >= IDLE_ENTRY_MILLIS) {
-                    ride.copy(
-                        motionState = MotionState.Idle,
-                        lowSpeedCandidateMillis = 0,
-                        highSpeedCandidateMillis = 0,
-                    )
-                } else {
-                    ride.copy(lowSpeedCandidateMillis = candidate, highSpeedCandidateMillis = 0)
-                }
-            }
-            else -> ride.copy(lowSpeedCandidateMillis = 0, highSpeedCandidateMillis = 0)
-        }
-
-        MotionState.Idle -> when {
-            speedMetersPerSecond >= MOVING_EXIT_SPEED -> {
-                val candidate = ride.highSpeedCandidateMillis + elapsedMillis
-                val chargedRide = ride.copy(idleMillis = ride.idleMillis + elapsedMillis)
-                if (candidate >= MOVING_EXIT_MILLIS) {
-                    chargedRide.copy(
-                        motionState = MotionState.Moving,
-                        lowSpeedCandidateMillis = 0,
-                        highSpeedCandidateMillis = 0,
-                    )
-                } else {
-                    chargedRide.copy(highSpeedCandidateMillis = candidate, lowSpeedCandidateMillis = 0)
-                }
-            }
-            else -> ride.copy(
-                idleMillis = ride.idleMillis + elapsedMillis,
-                highSpeedCandidateMillis = 0,
-            )
-        }
-    }
-
-    private fun timeout(ride: ActiveRide, nowElapsedMillis: Long): ActiveRide =
-        if (ride.phase == RidePhase.Running && isGpsLost(ride, nowElapsedMillis)) {
-            markGpsLost(ride, nowElapsedMillis)
-        } else {
-            ride
-        }
 
     private fun permissionRevoked(ride: ActiveRide): ActiveRide =
         if (ride.phase == RidePhase.Running) {
             ride.copy(
                 phase = RidePhase.Paused,
                 trackingStatus = TrackingStatus.PermissionNeeded,
-                lowSpeedCandidateMillis = 0,
-                highSpeedCandidateMillis = 0,
-                lastSpeedMetersPerSecond = null,
-                lastSpeedReceivedElapsedMillis = null,
+                timeTariffMillis = ride.billedTimeMillis,
+                provisionalTimeMillis = 0,
             )
         } else {
             ride
         }
+
+    private fun rejection(sample: LocationSample, nowElapsedMillis: Long): RideDecision.Reason? =
+        when {
+            // A synthetic fix must never reach the fare: this app's output is meant to be
+            // evidence, and a mock provider can manufacture any distance it likes.
+            sample.isMock -> RideDecision.Reason.RejectedMock
+            sample.provider != LocationSample.Provider.Gps -> RideDecision.Reason.RejectedNonGps
+            sample.accuracyMeters > BILLING_ACCURACY_METERS -> RideDecision.Reason.RejectedAccuracy
+            nowElapsedMillis - sample.fixElapsedMillis !in 0..FRESH_SAMPLE_MILLIS ->
+                RideDecision.Reason.RejectedStale
+
+            else -> null
+        }
+
+    private fun markWeak(ride: ActiveRide, nowElapsedMillis: Long): ActiveRide = ride.copy(
+        trackingStatus = TrackingStatus.Weak,
+        lastTickElapsedMillis = maxOf(ride.lastTickElapsedMillis, nowElapsedMillis),
+    )
 
     private fun isGpsLost(ride: ActiveRide, nowElapsedMillis: Long): Boolean =
         ride.lastFreshBillableReceivedElapsedMillis?.let {
             nowElapsedMillis - it >= GPS_LOSS_MILLIS
         } ?: false
 
+    /**
+     * The interval up to the last accepted fix is exactly the hold that was observed, so it is
+     * committed. The tail after that fix was never observed and is never charged.
+     */
     private fun markGpsLost(ride: ActiveRide, nowElapsedMillis: Long): ActiveRide = ride.copy(
         trackingStatus = TrackingStatus.GpsLost,
         lastTickElapsedMillis = nowElapsedMillis,
-        lastAcceptedFixElapsedMillis = null,
+        timeTariffMillis = ride.billedTimeMillis,
+        provisionalTimeMillis = 0,
+        lastAcceptedFix = null,
         lastFreshBillableReceivedElapsedMillis = null,
         lastBillablePoint = null,
-        lastSpeedMetersPerSecond = null,
-        lastSpeedReceivedElapsedMillis = null,
-        lowSpeedCandidateMillis = 0,
-        highSpeedCandidateMillis = 0,
-        motionState = MotionState.Moving,
+        pendingOutlier = null,
+        outlierStreak = 0,
+        motionState = MotionState.Idle,
     )
+
+    /**
+     * The implied speed a fix demands beyond what its own accuracy explains. Consecutive fixes at
+     * 20 m accuracy routinely differ by tens of metres while standing still, so the accuracy
+     * budget is subtracted before any speed is inferred.
+     */
+    private fun excessSpeedMetersPerSecond(from: LocationSample, to: LocationSample): Double {
+        val seconds = (to.fixElapsedMillis - from.fixElapsedMillis) / 1_000.0
+        if (seconds <= 0.0) return Double.POSITIVE_INFINITY
+        val beyondAccuracy = Geodesic.distanceMeters(from, to) -
+            (from.accuracyMeters + to.accuracyMeters)
+        return maxOf(0.0, beyondAccuracy) / seconds
+    }
+
+    /**
+     * A reported speed with its own uncertainty bounds the jump a fix may claim far more tightly
+     * than the absolute limit. The relative bound applies only when speed accuracy is reported,
+     * so a receiver publishing a bare zero speed cannot turn every fix into an outlier.
+     */
+    private fun plausibilityBound(sample: LocationSample): Double {
+        val speed = sample.speedMetersPerSecond ?: return MAX_PLAUSIBLE_SPEED
+        val accuracy = sample.speedAccuracyMetersPerSecond ?: return MAX_PLAUSIBLE_SPEED
+        return min(MAX_PLAUSIBLE_SPEED, speed + accuracy + SPEED_MARGIN)
+    }
+
+    /**
+     * A hold proves only that the average speed stayed under the deadband over the interval, so
+     * once the time tariff would out-earn the whole deadband the vehicle cannot be above the
+     * cross-over. A trusted Doppler speed answers sooner, in either direction.
+     */
+    private fun labelOnHold(
+        current: MotionState,
+        baselineAgeMillis: Long,
+        significantMeters: Double,
+        sample: LocationSample,
+        tariff: Tariff,
+    ): MotionState {
+        val crossover = tariff.crossoverSpeedMetersPerSecond
+        val speed = sample.speedMetersPerSecond
+        val speedAccuracy = sample.speedAccuracyMetersPerSecond
+        val confidentlyAbove = speed != null && speedAccuracy != null &&
+            speed - speedAccuracy >= crossover
+        val confidentlyBelow = speed != null && speedAccuracy != null &&
+            speed + speedAccuracy < crossover
+        val deadbandOutEarned = FareCalculator.compareDistanceToTimeFare(
+            tariff,
+            BigDecimal.valueOf(significantMeters),
+            baselineAgeMillis,
+        ) < 0
+
+        return when {
+            confidentlyAbove -> MotionState.Moving
+            confidentlyBelow || deadbandOutEarned -> MotionState.Idle
+            else -> current
+        }
+    }
+
+    /**
+     * The first close after a hold always goes to the time tariff, so the whole interval says
+     * nothing about the vehicle now. The sub-interval since the previous fix does, and it labels
+     * a car that has just pulled away correctly.
+     */
+    private fun labelOnTimeClose(
+        previousFix: LocationSample,
+        sample: LocationSample,
+        tariff: Tariff,
+    ): MotionState {
+        val seconds = (sample.fixElapsedMillis - previousFix.fixElapsedMillis) / 1_000.0
+        if (seconds <= 0.0) return MotionState.Idle
+        val speed = Geodesic.distanceMeters(previousFix, sample) / seconds
+        return if (speed >= tariff.crossoverSpeedMetersPerSecond) {
+            MotionState.Moving
+        } else {
+            MotionState.Idle
+        }
+    }
 
     /**
      * L5-class signals resolve movement a single-band fix cannot, so a dual-band segment may
@@ -315,35 +502,4 @@ object RideEngine {
         } else {
             MINIMUM_SIGNIFICANT_MOVEMENT_METERS
         }
-
-    /**
-     * Android's reported speed is Doppler-derived and generally better than anything this
-     * engine can difference from two positions, so it is discarded only when it cannot answer
-     * the one question asked of it: which side of Idle entry or Moving exit the vehicle sits
-     * on. A speed is unusable only when its own uncertainty spans one of those thresholds --
-     * a vehicle at 15 m/s stays trusted however loose its speed accuracy.
-     *
-     * The bound is one reported speed accuracy, which Android defines at the 68th percentile.
-     * A wider interval would reject far more speeds exactly where reception is poor, and the
-     * engine's five- and three-second hysteresis already absorbs the noise one sigma leaves.
-     */
-    private fun LocationSample.trustedSpeedMetersPerSecond(): Double? {
-        val speed = speedMetersPerSecond ?: return null
-        val accuracy = speedAccuracyMetersPerSecond ?: return speed
-        val plausibleSpeeds = (speed - accuracy)..(speed + accuracy)
-        val straddlesAThreshold =
-            IDLE_ENTRY_SPEED in plausibleSpeeds || MOVING_EXIT_SPEED in plausibleSpeeds
-        return if (straddlesAThreshold) null else speed
-    }
-
-    private fun distanceBetweenMeters(first: LocationSample, second: LocationSample): Double {
-        val latitudeRadians = Math.toRadians(second.latitude - first.latitude)
-        val longitudeRadians = Math.toRadians(second.longitude - first.longitude)
-        val a = sin(latitudeRadians / 2).pow(2) +
-            cos(Math.toRadians(first.latitude)) * cos(Math.toRadians(second.latitude)) *
-            sin(longitudeRadians / 2).pow(2)
-        return EARTH_RADIUS_METERS * 2 * asin(sqrt(a))
-    }
-
-    private const val EARTH_RADIUS_METERS = 6_371_000.0
 }

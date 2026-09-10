@@ -9,6 +9,5 @@ sealed interface RideInput {
     ) : RideInput
 
     data class Tick(val nowElapsedMillis: Long) : RideInput
-    data class GpsTimedOut(val nowElapsedMillis: Long) : RideInput
     data object PermissionRevoked : RideInput
 }

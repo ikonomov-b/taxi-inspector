@@ -252,7 +252,8 @@ class RideTrackingControllerTest {
         val interrupted = recovery.recoverRunningRideAfterOwnershipCheck(running.rideId, null)
         assertEquals(RidePhase.PendingInterrupted, interrupted?.phase)
         assertNull(interrupted?.lastBillablePoint)
-        assertNull(interrupted?.lastSpeedMetersPerSecond)
+        assertNull(interrupted?.lastAcceptedFix)
+        assertEquals(0L, interrupted?.provisionalTimeMillis)
 
         val repeated = recovery.recoverRunningRideAfterOwnershipCheck(running.rideId, null)
         assertEquals(interrupted, repeated)

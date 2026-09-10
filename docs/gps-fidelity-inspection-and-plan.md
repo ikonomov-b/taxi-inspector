@@ -1,6 +1,6 @@
 # Taxi Inspector — GPS Fidelity Inspection and Mode-S Implementation Plan
 
-> Status: **plan, not implemented**. Written 2026-09-09 against commit `7761412`. The fare and GPS contract in `taxi-inspector-design.md` remains authoritative until the work below lands and the design document is amended with it. Code changes are postponed; this document is the specification they will follow.
+> Status: **section 4 implemented; sections 5, 6 and 7 not started**. Written 2026-09-09 against commit `7761412`. The engine commit of section 8's sequence landed on 2026-09-10 and this document records the amendments it needed, each marked **Amended in implementation**. The fare and GPS contract in `taxi-inspector-design.md` is now behind the code and is rewritten in commit 4; until then this document is authoritative for engine behaviour.
 
 ## 1. Purpose
 
@@ -38,7 +38,7 @@ A throwaway JVM probe drove the current `RideEngine` at 1 Hz with the test tarif
 
 **F3. A single Weak fix as a hard billing boundary loses most urban distance.** The chord between two billing-quality fixes is a lower bound on the path whatever the fix between them looked like, so clearing the baseline buys no correctness. It discards the deadband residual at every boundary, and in-car accuracy hovering around 20 m makes those boundaries frequent: 59 % and 100 % loss in the flicker rows. The 60 m tier is dead code, since both branches call the same freeze.
 
-**F4. Outliers are billed twice.** The only plausibility bound is 1,500 m per segment, which at 1 Hz allows 360 km/h. A multipath jump moves the baseline to the outlier and the return is billed again.
+**F4. Outliers are billed twice.** The only plausibility bound is 1,500 m per segment. 360 km/h is the fastest *sustained* rate it admits, since continuity caps a segment at 15 seconds; a single 1 Hz segment may be the whole 1,500 m, which is 5,400 km/h. A multipath jump moves the baseline to the outlier and the return is billed again.
 
 **F5. Deadband residual and chord under-read are structural.** Every stop loses up to the deadband, and with in-car accuracy of 5–20 m the 2.5 m dual-band floor never binds. Accepted for now; the trace will measure it.
 
@@ -47,7 +47,7 @@ A throwaway JVM probe drove the current `RideEngine` at 1 Hz with the test tarif
 ## 3. Decisions
 
 1. **Fare model: mode S.** Implemented per closed segment as `max(perKm × chord, perMin × elapsed)`. This equals mode S exactly when speed stays on one side of the cross-over within the segment and is a lower bound otherwise, so the app reads at or below the meter. No speed and no hysteresis are needed for billing. The cross-over speed derives from the tariff; there is no new user input. The reference taximeter's own mode must still be confirmed in Phase 8; the plan's replay tooling makes that comparison cheap.
-2. **Switching from drive to idle must not take 15 seconds.** Billing switches within one fix; the display label within 2–5 s; the 15 s window governs only continuity and GPS loss (section 5.4).
+2. **Switching from drive to idle must not take 15 seconds.** Billing switches within one fix; the display label within 2–5 s; the 15 s window governs only continuity and GPS loss (section 4.4).
 3. **Weak fixes are non-observations**, not billing boundaries. GPS Lost at 15 s remains the only boundary.
 4. **Outliers are rejected by implied speed** with an accuracy budget, and a relocation is confirmed by two mutually plausible fixes or a streak of three.
 5. **Debug ride trace on by default in debug builds**, compiled out of release, shareable from Ride Detail.
@@ -77,7 +77,8 @@ Persistence (`data/rides/RideMappers.kt`): `toEntity` writes `idleMillis = timeT
 
 Companion changes:
 - `Tariff.crossoverSpeedMetersPerSecond`: `+∞` when `perKm == 0`, else `perMin × 1000 / (perKm × 60)`; `0.0` when `perMin == 0`. Label and trace only.
-- `FareCalculator`: extract `distanceFare(tariff, meters: BigDecimal)` and `timeFare(tariff, millis: Long)` (scale 18, HALF_UP), shared by `total`, `reconcile` and the label rule; parameter `idleMillis` renamed `timeTariffMillis`.
+- `FareCalculator`: extract `distanceFare(tariff, meters: BigDecimal)` and `timeFare(tariff, millis: Long)` (scale 18, HALF_UP), used by `total`; parameter `idleMillis` renamed `timeTariffMillis`.
+  **Amended in implementation.** `reconcile` and the label rule do not compare those two values. Dividing at scale 18 leaves a sixtieth a hair large, so for the documented tie case — `perKm` 1.20, `perMin` 0.36, 5 m in 1 s — `timeFare` exceeds `distanceFare` by 1.2e-19 and the tie falls to Time, not Distance. Both now call `FareCalculator.compareDistanceToTimeFare(tariff, meters, millis)`, which cross-multiplies `perKm x metres x 60` against `perMin x millis`: the same inequality with no division and no rounding at all. `FareCalculatorTest` pins both halves of this.
 - New `Geodesic.kt`: Vincenty inverse on WGS84 (a = 6 378 137, f = 1/298.257223563, tolerance 1e-12, ≤ 200 iterations), haversine fallback (R = 6 371 008.8) on non-convergence, 0 for coincident points. Replaces the mean-radius haversine.
 - `LocationSample`: add `utcMillis: Long? = null`, `bearingDegrees: Double? = null`, `altitudeMeters: Double? = null`, `satellitesUsedInFix: Int? = null`, `l5SignalCount: Int? = null`. Engine-neutral; needed by the trace (Locus GPX carries UTC).
 - `RideSummary.idleMillis → timeTariffMillis` (entity column unchanged); `finish()` writes `billedTimeMillis`.
@@ -159,6 +160,12 @@ Rules the pseudocode encodes:
 
 Known residuals, accepted and to be measured through the trace in Phase 8: a jitter excursion ≥ D in the first second after a close bills up to D metres as distance (about 0.006–0.012 per excursion; the same exposure exists today whenever the engine is Moving); a receiver that reports ≤ 20 m accuracy while producing 200 m jitter without speed accuracy can be accepted after 3 s by the streak cap. A "return to the previous baseline within the deadband" veto is the follow-up if field data shows creep.
 
+**Amended in implementation — the first residual is larger than stated, and it is a new over-read.** It is not confined to the first second after a close, and its size is not bounded by one excursion. D is the *larger* of the movement floor and either endpoint's accuracy, never their sum, while the plausibility budget above allows each endpoint its full accuracy. Section 2.3's own noise model says consecutive stationary fixes at 20 m accuracy "routinely differ by 15–30 m". Every such difference over 20 m is therefore simultaneously *plausible* and *significant*: it clears the deadband, reads as 30 m/s, wins on distance, and advances the baseline, so the next excursion bills again. `RideEngineTest.jitter wider than the deadband is billed as distance` pins the measured figure: a vehicle standing still for twenty seconds at 20 m accuracy bills 570 m, about 0.68 on the test tariff, or roughly 2 per minute of standing still.
+
+The superseded engine billed nothing there: a trusted 0 m/s dropped it into Idle within five seconds and distance/waiting exclusivity suppressed the distance. So this is the one place where the mode-S change moves the fare *up* rather than down, against the guardrail that ambiguous data must never over-charge, and it lands exactly in the urban-canyon case F2 and F3 were about. It is bounded only by the receiver's accuracy reporting, not by anything the engine does.
+
+The named follow-up is the right fix and should not wait for field data: veto a close whose chord is under the *sum* of the endpoint accuracies, or whose new baseline returns within the deadband of the previous one, so pure jitter cannot ratchet. Both are cheap and pure. Decide it before commit 2, because the trace in commit 3 will otherwise spend its first drive measuring a defect that is already provable in a unit test.
+
 ### 4.3 Worked results under the new engine
 
 Tariff 2.40 / 1.20 per km / 0.35 per minute, cross-over 4.861 m/s (0.0058333 per second, 0.0012 per metre).
@@ -212,7 +219,8 @@ Rewrite with mode-S expectations: GPS timeout commits the observed wait (fixes 0
 
 New:
 - Probe regressions: jam → total 5.90; stationary with ambiguous Doppler and without speed → 60 s, then Pause commits 60 000; one Weak in five and alternating Weak → 600 m; single outlier → 100 m with `pendingOutlier` set at 5 s and cleared at 6 s, status Good throughout; creep with three stops → 120 000 ms, 0 m, 3.10.
-- Two consecutive plausible outliers relocate without billing the jump (fixes 0..4 on track, 5..10 on a parallel track 200 m east → 80 m, 0 s, baseline at 6 000). Three mutually implausible fixes relocate (streak cap). An outlier burst refreshes the loss timer but not the baseline (outliers 5..9 alternating ±200 m, on-track fix at 10 → 100 m total, never Lost).
+- Two consecutive plausible outliers relocate without billing the jump (fixes 0..4 on track, 5..10 on a parallel track 200 m east → 80 m, 0 s, baseline at 6 000). Three mutually implausible fixes relocate (streak cap). An outlier burst refreshes the loss timer but not the baseline.
+  **Amended in implementation.** The burst case was specified as five outliers (5..9 alternating ±200 m), which `OUTLIER_STREAK_LIMIT = 3` relocates at fix 7 by design, so the baseline does move and the total is 60 m, not 100 m. A burst that keeps the baseline is by definition shorter than the cap: the test uses two mutually implausible outliers at 5 and 6, then on-track fixes at 7..10, which bills the real 100 m across the burst without ever relocating and without ever going Lost.
 - Plausibility: 14 s gap with 700 m bills, 900 m is an outlier; reported 10 ± 1 m/s over 1 s with 5 m accuracy: 50 m chord rejected (excess 40 > 26), 30 m accepted; 20 m accuracy with ±30 m jumps and 0 ± 0.5 m/s never an outlier.
 - Latency: the timeline above (billed time 1..6 s and one +16 m step; label Idle at t = 3 for 10 m, t = 2 for 5 m); tick fallback labels Idle by 5 000 ms during Weak; slow Doppler flips in one second; fast Doppler flips to Moving before the first distance close; Moving on a distance close and on a Time close whose sub-interval speed exceeds the cross-over; departure closes within four seconds at 10 m and settles as time.
 - Commit rules: Pause, PermissionRevoked, GPS loss (fixes 0..30, tick 45 000 → 30 000 committed, total unchanged across the tick), finish includes provisional, interrupt commits provisional.
@@ -236,7 +244,13 @@ Out-of-package fallout (mechanical): `MeterViewModel`, `RideNotificationFactory`
 
 Hold a `PowerManager.PARTIAL_WAKE_LOCK` (tag `TaxiInspector:ride`, non-reference-counted) from `startPreparing()` until `stop()` and `onDestroy()`. Add `android.permission.WAKE_LOCK` to the manifest. Suppress lint `WakelockTimeout` with a comment: the lock lifetime is bounded by the foreground service, and a ride may legitimately last hours.
 
-### 5.3 `tracking/RideTrackingController.kt`
+### 5.3 Room write cadence
+
+**Amended in implementation** — F6 lists "Room is written twice per second" and nothing in sections 4–8 acted on it. `RideTrackingController.updateRide` writes on every changed reduce, and both the 1 Hz ticker and the 1 Hz location flow change state, so a ride writes about twice a second for its whole duration; the trace recorder adds its own I/O on top.
+
+Provisional time is now reconstructible: it is `lastAcceptedFix.fix − lastBillablePoint.fix`, and the mapper already commits it into the stored column. So the snapshot only has to be written when something durable changes — a close, a commit, a phase or status change — and a plain hold can be left to the next write. Recovery loses at most the hold since the last write, which is the same bound a service kill already has. Decide this with section 5.2's wakelock, since both change how a long ride behaves in the background.
+
+### 5.4 `tracking/RideTrackingController.kt`
 
 Use `RideEngine.step()` and hand `(input, before, after, decision)` to a `RideTraceRecorder` (section 6). Record every location (accepted or not), ticks only when status or label changes, every command, and the ride end. The notification reads `billedTimeMillis`.
 

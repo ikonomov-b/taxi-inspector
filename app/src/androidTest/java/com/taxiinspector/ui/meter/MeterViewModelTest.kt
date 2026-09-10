@@ -175,7 +175,7 @@ class MeterViewModelTest {
         saveCompany()
         val ride = repository.startRide("ride-fare", 1_000)
         repository.updateActiveRide(
-            ride.copy(distanceMeters = BigDecimal("2500"), idleMillis = 180_000),
+            ride.copy(distanceMeters = BigDecimal("2500"), timeTariffMillis = 180_000),
         )
 
         val presentation = awaitState { it.presentation.distance != "0.00" }.presentation

@@ -1,6 +1,13 @@
 package com.taxiinspector.ride
 
-/** Android-free location input used by the fare engine. */
+/**
+ * Android-free location input used by the fare engine.
+ *
+ * The engine reads only position, accuracy, provider, mock flag, band, speed and the two elapsed
+ * timestamps. [utcMillis], [bearingDegrees], [altitudeMeters], [satellitesUsedInFix] and
+ * [l5SignalCount] are carried for the debug ride trace, which has to be comparable with an
+ * independent GPX recording of the same trip; no billing rule may read them.
+ */
 data class LocationSample(
     val latitude: Double,
     val longitude: Double,
@@ -12,6 +19,11 @@ data class LocationSample(
     val band: Band = Band.Unknown,
     val speedAccuracyMetersPerSecond: Double? = null,
     val isMock: Boolean = false,
+    val utcMillis: Long? = null,
+    val bearingDegrees: Double? = null,
+    val altitudeMeters: Double? = null,
+    val satellitesUsedInFix: Int? = null,
+    val l5SignalCount: Int? = null,
 ) {
     enum class Provider { Gps, Network, Other }
 
@@ -35,6 +47,15 @@ data class LocationSample(
         }
         require(fixElapsedMillis >= 0 && receivedElapsedMillis >= 0) {
             "Elapsed timestamps cannot be negative."
+        }
+        require(bearingDegrees == null || bearingDegrees in 0.0..360.0) {
+            "Bearing must be in range."
+        }
+        require(satellitesUsedInFix == null || satellitesUsedInFix >= 0) {
+            "Satellite count cannot be negative."
+        }
+        require(l5SignalCount == null || l5SignalCount >= 0) {
+            "Signal count cannot be negative."
         }
     }
 }

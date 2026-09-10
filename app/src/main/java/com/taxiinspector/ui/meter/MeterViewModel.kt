@@ -259,10 +259,10 @@ class MeterViewModel(
 
     private fun presentationOf(ride: ActiveRide?): MeterPresentation {
         if (ride == null) return MeterPresentation.EMPTY
-        val totalSeconds = ride.idleMillis / MILLIS_PER_SECOND
+        val totalSeconds = ride.billedTimeMillis / MILLIS_PER_SECOND
         return MeterPresentation(
             // The fare engine remains the only place a total is calculated.
-            total = FareCalculator.total(ride.tariff, ride.distanceMeters, ride.idleMillis).formatTotal(),
+            total = FareCalculator.total(ride.tariff, ride.distanceMeters, ride.billedTimeMillis).formatTotal(),
             distance = formatKilometres(ride.distanceMeters),
             waitTime = formatWaitTime(totalSeconds),
             waitMinutes = totalSeconds / SECONDS_PER_MINUTE,

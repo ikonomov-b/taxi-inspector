@@ -36,7 +36,7 @@ internal class RideHistoryFormatter(
             endedAt = formatTimestamp(saved.endedAtUtcMillis),
             total = total.formatTotal(locale),
             distanceKilometres = formatKilometres(distanceMeters),
-            waitTime = formatDuration(idleMillis),
+            waitTime = formatDuration(timeTariffMillis),
             elapsedTime = formatDuration(elapsedMillis),
             initialTax = tariff.initialTax.formatConfigured(locale),
             perKmRate = tariff.perKmRate.formatConfigured(locale),

@@ -90,7 +90,7 @@ class RideDetailViewModelTest {
         useCompany(tariff())
         val active = repository.startRide(id, 1_000).copy(
             distanceMeters = BigDecimal("2500"),
-            idleMillis = 180_000,
+            timeTariffMillis = 180_000,
         )
         repository.finishCompleted(
             RideEngine.finish(active, 3_850_000),

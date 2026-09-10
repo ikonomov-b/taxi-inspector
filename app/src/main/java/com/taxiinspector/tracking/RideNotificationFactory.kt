@@ -42,7 +42,7 @@ internal class RideNotificationFactory(
         val total = FareCalculator.total(
             ride.tariff,
             ride.distanceMeters,
-            ride.idleMillis,
+            ride.billedTimeMillis,
         ).formatTotal()
         return baseBuilder()
             .setContentTitle(context.getString(R.string.tracking_notification_total, total))
