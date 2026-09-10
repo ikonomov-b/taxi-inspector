@@ -164,7 +164,27 @@ Known residuals, accepted and to be measured through the trace in Phase 8: a jit
 
 The superseded engine billed nothing there: a trusted 0 m/s dropped it into Idle within five seconds and distance/waiting exclusivity suppressed the distance. So this is the one place where the mode-S change moves the fare *up* rather than down, against the guardrail that ambiguous data must never over-charge, and it lands exactly in the urban-canyon case F2 and F3 were about. It is bounded only by the receiver's accuracy reporting, not by anything the engine does.
 
-The named follow-up is the right fix and should not wait for field data: veto a close whose chord is under the *sum* of the endpoint accuracies, or whose new baseline returns within the deadband of the previous one, so pure jitter cannot ratchet. Both are cheap and pure. Decide it before commit 2, because the trace in commit 3 will otherwise spend its first drive measuring a defect that is already provable in a unit test.
+**Resolved the same day, in the direction the plan named.** The deadband is now `max(floor, a_baseline + a_sample)` — the same accuracy budget the plausibility rule spends, so a chord can no longer be plausible as noise and significant as movement at once. Nothing else changed, and the change can only lower a fare: holding instead of closing bills the interval as time, and a close only wins on distance when distance out-earns the whole interval as time.
+
+The plan's second candidate, a "return to the previous baseline" veto, was rejected. It catches a strict oscillation but not a random walk, which is the actual failure: for a 2-D walk the fix two steps back is typically further away than the deadband, so it vetoes about a quarter of steps.
+
+A throwaway JVM probe measured both rules against Gaussian per-axis noise at sigma = accuracy / 1.51 (Android reports accuracy as a 68 % radius), 1 Hz, twenty seeds, medians:
+
+| Reported accuracy | Stationary 10 min, distance billed | 10 m/s for 10 min, 6 000 m true |
+| --- | --- | --- |
+| 5 m | 1 857 m → **303 m** | 6 628 m → **6 395 m** (+10.5 % → +6.6 %) |
+| 10 m | 4 716 m → **890 m** | 8 152 m → **6 784 m** (+36 % → +13 %) |
+| 20 m | 10 453 m → **2 176 m** | 12 541 m → **7 778 m** (+109 % → +30 %) |
+
+So the budget removes about 80 % of the noise-driven distance at every accuracy, and the over-read on genuine travel at 20 m accuracy falls from more than double to +30 %.
+
+Three things this does not settle, and they are now the most valuable thing the commit-3 trace can measure:
+
+1. **The residual is still material** — 2 176 m per stationary ten minutes at 20 m accuracy is 2.6 on the test tariff. Summing chords between noisy fixes over-reads whether the vehicle moves or not, because the chord is `|displacement + noise|` and the close fires on the first chord to clear the deadband, which favours the noisy-high ones. No veto removes that; only a wider deadband or a different distance estimator does. A 3-sigma budget (about `3 x accuracy` rather than `2 x accuracy`) would cut the leak rate from roughly 10 % of steps to 0.6 %, but it is an invented constant and it costs chord fidelity on curves, so it belongs in the 8.3 threshold decision with real traces behind it.
+2. **The probe assumes independent per-fix error, which is the pessimistic extreme.** Real GNSS error is strongly common-mode over tens of seconds, so a stationary phone drifts rather than jumps and the field figure should be far smaller. Nobody has measured it on this hardware. The trace answers it directly: the reason-code histogram plus a stationary hold is the whole experiment.
+3. **The over-read on genuine travel is not new.** The superseded engine summed chords the same way whenever it was Moving, and did it with the narrower deadband, so the +109 % row is pre-existing behaviour that this change improves. It has simply never been measured before.
+
+Note also what the wider budget costs: the 2.5 m dual-band floor now only decides anything when the two accuracies sum to under 2.5 m, which no phone reports. Under mode S that is a small loss — the floor existed to keep slow city travel from being measured as straight chords across curves, and slow travel now bills time — but whether to keep the floor at all is a Phase 8.3 question.
 
 ### 4.3 Worked results under the new engine
 

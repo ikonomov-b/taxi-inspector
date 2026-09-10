@@ -177,10 +177,16 @@ object RideEngine {
 
         val chordMeters = Geodesic.distanceMeters(baseline, sample)
         val baselineAgeMillis = sample.fixElapsedMillis - baseline.fixElapsedMillis
+        // Both endpoints get their full accuracy, the same budget the plausibility rule above
+        // spends. Taking only the larger of the two let a chord be simultaneously plausible as
+        // noise and significant as movement, which is a contradiction the fare paid for: at
+        // 20 m accuracy a standing vehicle's fixes differ by more than 20 m about half the time,
+        // and each difference used to be billed as distance and then move the baseline, so the
+        // next one billed too. Holding instead of closing always bills less, because a close
+        // only wins on distance when distance out-earns the whole interval as time.
         val significantMeters = maxOf(
             significantMovementFloorMeters(baseline, sample),
-            baseline.accuracyMeters,
-            sample.accuracyMeters,
+            baseline.accuracyMeters + sample.accuracyMeters,
         )
 
         if (chordMeters < significantMeters) {
@@ -492,6 +498,12 @@ object RideEngine {
      * L5-class signals resolve movement a single-band fix cannot, so a dual-band segment may
      * bill smaller steps. Both endpoints must be dual-band: the deadband covers noise at each
      * end of the segment, and a baseline restored from persistence comes back as Unknown.
+     *
+     * Since the deadband now spends both endpoints' accuracy, this floor only decides anything
+     * once their sum is under 2.5 m, which a phone does not reach. Under mode S that costs
+     * little: the floor existed to stop slow city travel being measured as straight chords
+     * across curves, and slow travel now bills time rather than distance. Whether to keep the
+     * floor at all is a Phase 8.3 question for the field trace.
      */
     private fun significantMovementFloorMeters(
         baseline: LocationSample,

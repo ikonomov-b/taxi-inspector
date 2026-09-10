@@ -91,7 +91,7 @@ class RideEngineTest {
             val drift = if (second % 2 == 0) 2.0 else 0.0
             ride = ride.receive(fix(elapsedMillis = second * 1_000L, northMeters = drift))
         }
-        ride = ride.receive(fix(elapsedMillis = 16_000, northMeters = 6.0))
+        ride = ride.receive(fix(elapsedMillis = 16_000, northMeters = 12.0))
 
         assertEquals(16_000, ride.billedTimeMillis)
         assertEquals(0, ride.distanceMeters.signum())
@@ -149,10 +149,15 @@ class RideEngineTest {
     fun `dual band fixes bill a step a single band fix discards as noise`() {
         // 3 m per half second is 6 m/s, above the cross-over, so the step is distance when the
         // deadband is small enough to resolve it at all.
+        //
+        // The accuracy here is 1 m, which a phone does not report: now that the deadband spends
+        // both endpoints' accuracy, the 2.5 m dual-band floor only decides anything when their
+        // sum is under it. The rule is still tested, but see the note on
+        // `significantMovementFloorMeters` for why it has stopped mattering in a vehicle.
         fun distanceAfterThreeMetreStep(band: LocationSample.Band): Double {
-            var ride = newRide().receive(fix(elapsedMillis = 0, accuracyMeters = 2.0, band = band))
+            var ride = newRide().receive(fix(elapsedMillis = 0, accuracyMeters = 1.0, band = band))
             ride = ride.receive(
-                fix(elapsedMillis = 500, northMeters = 3.0, accuracyMeters = 2.0, band = band),
+                fix(elapsedMillis = 500, northMeters = 3.0, accuracyMeters = 1.0, band = band),
             )
             return ride.distanceMeters.toDouble()
         }
@@ -175,9 +180,9 @@ class RideEngineTest {
 
     @Test
     fun `travel above the cross-over bills distance and no time`() {
-        val ride = driveProfile(fixes = 20) { 10.0 }
+        val ride = driveProfile(fixes = 20) { 12.0 }
 
-        assertEquals(190.0, ride.distanceMeters.toDouble(), 0.1)
+        assertEquals(228.0, ride.distanceMeters.toDouble(), 0.1)
         assertEquals(0, ride.billedTimeMillis)
         assertEquals(MotionState.Moving, ride.motionState)
     }
@@ -186,10 +191,11 @@ class RideEngineTest {
     fun `a stop then a departure bills the stop as time and the drive as distance`() {
         val ride = driveProfile(fixes = 30) { if (it < 10) 0.0 else 6.0 }
 
-        // The interval spanning the stop and the pull-away closes on time, whole; every later
-        // second is 6 m of distance.
-        assertEquals(11_000, ride.billedTimeMillis)
-        assertEquals(108.0, ride.distanceMeters.toDouble(), 0.1)
+        // The interval spanning the stop and the pull-away closes on time, whole. At 5 m
+        // accuracy the deadband is 10 m, so 6 m/s then closes every second second, 12 m at a
+        // time, and the last part-second is absorbed into the hold as time.
+        assertEquals(13_000, ride.billedTimeMillis)
+        assertEquals(96.0, ride.distanceMeters.toDouble(), 0.1)
     }
 
     @Test
@@ -270,11 +276,11 @@ class RideEngineTest {
     fun `weak flicker no longer loses urban distance`() {
         val oneInFive = driveProfile(
             fixes = 61,
-            accuracyAt = { if (it % 5 == 4) 25.0 else 15.0 },
+            accuracyAt = { if (it % 5 == 4) 25.0 else 12.0 },
         ) { 10.0 }
         val alternating = driveProfile(
             fixes = 61,
-            accuracyAt = { if (it % 2 == 0) 15.0 else 25.0 },
+            accuracyAt = { if (it % 2 == 0) 12.0 else 25.0 },
         ) { 10.0 }
 
         assertEquals(600.0, oneInFive.distanceMeters.toDouble(), 0.1)
@@ -302,7 +308,7 @@ class RideEngineTest {
         for (second in 0..10) {
             val displaced = if (second == 5) 200.0 else 0.0
             ride = ride.receive(
-                fix(elapsedMillis = second * 1_000L, northMeters = second * 10.0 + displaced),
+                fix(elapsedMillis = second * 1_000L, northMeters = second * 12.0 + displaced),
             )
             states += ride
         }
@@ -310,7 +316,7 @@ class RideEngineTest {
         assertNotNull(states[5].pendingOutlier)
         assertNull(states[6].pendingOutlier)
         assertTrue(states.all { it.trackingStatus == TrackingStatus.Good })
-        assertEquals(100.0, ride.distanceMeters.toDouble(), 0.1)
+        assertEquals(120.0, ride.distanceMeters.toDouble(), 0.1)
         assertEquals(0, ride.billedTimeMillis)
     }
 
@@ -321,15 +327,15 @@ class RideEngineTest {
         for (second in 0..10) {
             val east = if (second >= 5) 200.0 else 0.0
             ride = ride.receive(
-                fix(elapsedMillis = second * 1_000L, northMeters = second * 10.0, eastMeters = east),
+                fix(elapsedMillis = second * 1_000L, northMeters = second * 12.0, eastMeters = east),
             )
             if (second == 6) afterRelocation = ride
         }
 
-        // The relocation itself is not distance: 40 m before the jump, 40 m after it.
+        // The relocation itself is not distance: 48 m before the jump, 48 m after it.
         assertEquals(6_000L, afterRelocation?.lastBillablePoint?.fixElapsedMillis)
-        assertEquals(40.0, afterRelocation!!.distanceMeters.toDouble(), 0.1)
-        assertEquals(80.0, ride.distanceMeters.toDouble(), 0.1)
+        assertEquals(48.0, afterRelocation!!.distanceMeters.toDouble(), 0.1)
+        assertEquals(96.0, ride.distanceMeters.toDouble(), 0.1)
         assertEquals(0, ride.billedTimeMillis)
     }
 
@@ -337,7 +343,7 @@ class RideEngineTest {
     fun `three mutually implausible fixes relocate at the streak cap`() {
         var ride = newRide()
         for (second in 0..4) {
-            ride = ride.receive(fix(elapsedMillis = second * 1_000L, northMeters = second * 10.0))
+            ride = ride.receive(fix(elapsedMillis = second * 1_000L, northMeters = second * 12.0))
         }
         // No two of these agree with each other, so only the streak cap can end the freeze.
         for ((index, east) in listOf(200.0, 400.0, 600.0).withIndex()) {
@@ -347,28 +353,28 @@ class RideEngineTest {
         assertEquals(7_000L, ride.lastBillablePoint?.fixElapsedMillis)
         assertEquals(0, ride.outlierStreak)
         assertNull(ride.pendingOutlier)
-        assertEquals(40.0, ride.distanceMeters.toDouble(), 0.1)
+        assertEquals(48.0, ride.distanceMeters.toDouble(), 0.1)
     }
 
     @Test
     fun `an outlier burst refreshes the loss timer without moving the baseline`() {
         var ride = newRide()
         for (second in 0..4) {
-            ride = ride.receive(fix(elapsedMillis = second * 1_000L, northMeters = second * 10.0))
+            ride = ride.receive(fix(elapsedMillis = second * 1_000L, northMeters = second * 12.0))
         }
-        ride = ride.receive(fix(elapsedMillis = 5_000, northMeters = 50.0, eastMeters = 200.0))
-        ride = ride.receive(fix(elapsedMillis = 6_000, northMeters = 60.0, eastMeters = -200.0))
+        ride = ride.receive(fix(elapsedMillis = 5_000, northMeters = 60.0, eastMeters = 200.0))
+        ride = ride.receive(fix(elapsedMillis = 6_000, northMeters = 72.0, eastMeters = -200.0))
 
         assertEquals(4_000L, ride.lastBillablePoint?.fixElapsedMillis)
         assertEquals(2, ride.outlierStreak)
 
         for (second in 7..10) {
-            ride = ride.receive(fix(elapsedMillis = second * 1_000L, northMeters = second * 10.0))
+            ride = ride.receive(fix(elapsedMillis = second * 1_000L, northMeters = second * 12.0))
         }
 
         // The burst kept the ride alive and the real track was billed across it.
         assertEquals(TrackingStatus.Good, ride.trackingStatus)
-        assertEquals(100.0, ride.distanceMeters.toDouble(), 0.1)
+        assertEquals(120.0, ride.distanceMeters.toDouble(), 0.1)
     }
 
     @Test
@@ -416,16 +422,11 @@ class RideEngineTest {
     }
 
     @Test
-    fun `jitter wider than the deadband is billed as distance`() {
-        // The documented residual, pinned so a field trace can be compared against it and so a
-        // veto rule cannot be added without this number changing.
-        //
-        // The deadband is the LARGER of the movement floor and either endpoint's accuracy, not
-        // their sum, so at 20 m accuracy a 30 m excursion reads as 30 m/s -- above the
-        // cross-over -- and every one of the nineteen jumps below is billed as distance. The
-        // plausibility rule calls the same fixes plausible, because it does allow both endpoints
-        // their accuracy. Standing still therefore bills 570 m here where the superseded speed
-        // hysteresis would have billed waiting time and no distance at all.
+    fun `jitter inside the combined accuracy of two fixes is not billed as distance`() {
+        // The deadband spends both endpoints' accuracy, so at 20 m accuracy a 30 m excursion
+        // cannot be told from noise and bills as tariff time, not as 30 m/s of travel. Taking
+        // only the larger accuracy billed each of these nineteen jumps and advanced the baseline
+        // each time, so standing still cost 570 m.
         val ride = driveProfile(
             fixes = 20,
             accuracyMeters = 20.0,
@@ -434,7 +435,18 @@ class RideEngineTest {
             positionAt = { if (it % 2 == 0) 0.0 else 30.0 },
         )
 
-        assertEquals(570.0, ride.distanceMeters.toDouble(), 0.1)
+        assertEquals(0, ride.distanceMeters.signum())
+        assertEquals(19_000, ride.billedTimeMillis)
+    }
+
+    @Test
+    fun `movement clear of the combined accuracy is still billed at the same accuracy`() {
+        // The veto is a noise floor, not a suppression: 50 m in one second at 20 m accuracy is
+        // 10 m beyond anything the two fixes can explain, so it bills.
+        var ride = newRide().receive(fix(elapsedMillis = 0, accuracyMeters = 20.0))
+        ride = ride.receive(fix(elapsedMillis = 1_000, northMeters = 50.0, accuracyMeters = 20.0))
+
+        assertEquals(50.0, ride.distanceMeters.toDouble(), 0.1)
         assertEquals(0, ride.billedTimeMillis)
     }
 
@@ -442,48 +454,56 @@ class RideEngineTest {
 
     @Test
     fun `a hard stop bills every second and turns the label idle`() {
-        // 8 m/s at 10 m accuracy closes every two seconds; the last close lands on the stop.
+        // 8 m/s at 10 m accuracy clears the 20 m deadband on the third second; the close lands
+        // on the stop fix.
         var ride = newRide().receive(fix(elapsedMillis = 0, accuracyMeters = 10.0))
         ride = ride.receive(fix(elapsedMillis = 1_000, northMeters = 8.0, accuracyMeters = 10.0))
-        assertEquals(0, ride.distanceMeters.signum())
         ride = ride.receive(fix(elapsedMillis = 2_000, northMeters = 16.0, accuracyMeters = 10.0))
-        assertEquals(16.0, ride.distanceMeters.toDouble(), 0.05)
+        assertEquals(0, ride.distanceMeters.signum())
+        ride = ride.receive(fix(elapsedMillis = 3_000, northMeters = 24.0, accuracyMeters = 10.0))
+        assertEquals(24.0, ride.distanceMeters.toDouble(), 0.05)
         assertEquals(MotionState.Moving, ride.motionState)
 
         val billed = mutableListOf<Long>()
         val labels = mutableListOf<MotionState>()
-        for (second in 3..8) {
+        for (second in 4..9) {
             ride = ride.receive(
-                fix(elapsedMillis = second * 1_000L, northMeters = 16.0, accuracyMeters = 10.0),
+                fix(elapsedMillis = second * 1_000L, northMeters = 24.0, accuracyMeters = 10.0),
             )
             billed += ride.billedTimeMillis
             labels += ride.motionState
         }
 
+        // Billing latency is one fix from the stop. The label waits until the time tariff
+        // out-earns the whole deadband, which is five seconds once the deadband is 20 m.
         assertEquals(listOf(1_000L, 2_000L, 3_000L, 4_000L, 5_000L, 6_000L), billed)
         assertEquals(
             listOf(
                 MotionState.Moving,
                 MotionState.Moving,
-                MotionState.Idle,
-                MotionState.Idle,
+                MotionState.Moving,
+                MotionState.Moving,
                 MotionState.Idle,
                 MotionState.Idle,
             ),
             labels,
         )
-        assertEquals(16.0, ride.distanceMeters.toDouble(), 0.05)
+        assertEquals(24.0, ride.distanceMeters.toDouble(), 0.05)
     }
 
     @Test
-    fun `a tighter deadband settles the label a second sooner`() {
+    fun `a tighter deadband settles the label sooner`() {
+        // 5 m accuracy makes the deadband 10 m, which the time tariff out-earns in three
+        // seconds instead of five.
         var ride = newRide().receive(fix(elapsedMillis = 0))
-        ride = ride.receive(fix(elapsedMillis = 1_000, northMeters = 8.0))
+        ride = ride.receive(fix(elapsedMillis = 1_000, northMeters = 12.0))
         assertEquals(MotionState.Moving, ride.motionState)
 
-        ride = ride.receive(fix(elapsedMillis = 2_000, northMeters = 8.0))
+        ride = ride.receive(fix(elapsedMillis = 2_000, northMeters = 12.0))
         assertEquals(MotionState.Moving, ride.motionState)
-        ride = ride.receive(fix(elapsedMillis = 3_000, northMeters = 8.0))
+        ride = ride.receive(fix(elapsedMillis = 3_000, northMeters = 12.0))
+        assertEquals(MotionState.Moving, ride.motionState)
+        ride = ride.receive(fix(elapsedMillis = 4_000, northMeters = 12.0))
         assertEquals(MotionState.Idle, ride.motionState)
     }
 
@@ -491,11 +511,11 @@ class RideEngineTest {
     fun `the tick fallback labels idle during a weak stretch`() {
         var ride = newRide()
         for (second in 0..5) {
-            ride = ride.receive(fix(elapsedMillis = second * 1_000L, northMeters = second * 8.0))
+            ride = ride.receive(fix(elapsedMillis = second * 1_000L, northMeters = second * 12.0))
         }
         assertEquals(MotionState.Moving, ride.motionState)
 
-        ride = ride.receive(fix(elapsedMillis = 6_000, northMeters = 48.0, accuracyMeters = 25.0))
+        ride = ride.receive(fix(elapsedMillis = 6_000, northMeters = 72.0, accuracyMeters = 25.0))
         assertEquals(TrackingStatus.Weak, ride.trackingStatus)
 
         val distanceBefore = ride.distanceMeters
@@ -511,16 +531,16 @@ class RideEngineTest {
     @Test
     fun `a trusted slow speed labels idle in one fix`() {
         var ride = newRide().receive(fix(elapsedMillis = 0, accuracyMeters = 10.0))
-        ride = ride.receive(fix(elapsedMillis = 1_000, northMeters = 16.0, accuracyMeters = 10.0))
+        ride = ride.receive(fix(elapsedMillis = 1_000, northMeters = 24.0, accuracyMeters = 10.0))
         assertEquals(MotionState.Moving, ride.motionState)
 
         val silent = ride.receive(
-            fix(elapsedMillis = 2_000, northMeters = 16.0, accuracyMeters = 10.0),
+            fix(elapsedMillis = 2_000, northMeters = 24.0, accuracyMeters = 10.0),
         )
         val doppler = ride.receive(
             fix(
                 elapsedMillis = 2_000,
-                northMeters = 16.0,
+                northMeters = 24.0,
                 accuracyMeters = 10.0,
                 speed = 0.3,
                 speedAccuracy = 1.0,
@@ -568,23 +588,24 @@ class RideEngineTest {
     }
 
     @Test
-    fun `a departure closes within four seconds and settles as time`() {
-        // Pulling away at 2 m/s squared covers t squared metres; 10 m accuracy needs four
-        // seconds to clear the deadband, and a departing car is below the cross-over for most
-        // of that, so the interval is time.
+    fun `a departure after a stop closes on the time tariff`() {
+        // Five seconds stopped, then pulling away at 2 m/s squared, which covers t squared
+        // metres. At 10 m accuracy the 20 m deadband is cleared five seconds after the car
+        // moves, and the stop it is measured across makes the whole interval time.
         var ride = newRide().receive(fix(elapsedMillis = 0, accuracyMeters = 10.0))
-        for (second in 1..4) {
+        for (second in 1..10) {
+            val moving = (second - 5).coerceAtLeast(0)
             ride = ride.receive(
                 fix(
                     elapsedMillis = second * 1_000L,
-                    northMeters = (second * second).toDouble(),
+                    northMeters = (moving * moving).toDouble(),
                     accuracyMeters = 10.0,
                 ),
             )
         }
 
-        assertEquals(4_000L, ride.lastBillablePoint?.fixElapsedMillis)
-        assertEquals(4_000, ride.timeTariffMillis)
+        assertEquals(10_000L, ride.lastBillablePoint?.fixElapsedMillis)
+        assertEquals(10_000, ride.timeTariffMillis)
         assertEquals(0, ride.distanceMeters.signum())
     }
 
@@ -761,7 +782,7 @@ class RideEngineTest {
         )
         assertEquals(
             RideDecision.Reason.ClosedTime,
-            reasonOf(running, fix(elapsedMillis = 10_000, northMeters = 6.0)),
+            reasonOf(running, fix(elapsedMillis = 10_000, northMeters = 12.0)),
         )
         assertEquals(
             RideDecision.Reason.Outlier,
