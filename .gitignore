@@ -6,3 +6,7 @@ local.properties
 .DS_Store
 __pycache__/
 .kotlin/
+
+# Pulled ride traces. They hold the coordinates of real trips and are field data, not source;
+# scripts/pull-traces.sh writes here by default.
+traces/
