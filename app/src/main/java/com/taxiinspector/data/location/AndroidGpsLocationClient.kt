@@ -13,6 +13,7 @@ import android.os.Looper
 import android.os.SystemClock
 import android.util.Log
 import com.taxiinspector.ride.LocationSample
+import com.taxiinspector.ride.SignalQuality
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.TimeUnit
 import kotlinx.coroutines.channels.awaitClose
@@ -46,22 +47,22 @@ class AndroidGpsLocationClient internal constructor(
         // Both callbacks share the one thread, so these need no synchronisation.
         var observedBand = LocationSample.Band.Unknown
         var observedElapsedMillis: Long? = null
-        var observedL5Count: Int? = null
-        var observedUsedInFix: Int? = null
+        var observedSignal: SignalQuality? = null
 
-        val statusListener = GnssStatusListener { satellitesInView, carrierFrequenciesHz ->
-            observedBand = GnssBandClassifier.classify(carrierFrequenciesHz)
+        val statusListener = GnssStatusListener { observation ->
+            observedBand = GnssBandClassifier.classify(observation.carrierFrequenciesUsedInFix)
+            observedSignal = SignalQuality(
+                satellitesInView = observation.satellitesInView,
+                satellitesUsedInFix = observation.satellitesUsedInFix,
+                l5SignalCount = GnssBandClassifier.l5SignalCount(
+                    observation.carrierFrequenciesUsedInFix,
+                ),
+                medianCn0UsedDbHz = observation.cn0UsedDbHz.medianOrNull(),
+                medianCn0InViewDbHz = observation.cn0InViewDbHz.medianOrNull(),
+            )
             observedElapsedMillis = receivedElapsedRealtimeMillis()
-            observedL5Count = GnssBandClassifier.l5SignalCount(carrierFrequenciesHz)
-            observedUsedInFix = carrierFrequenciesHz.size
             if (Log.isLoggable(FIELD_TAG, Log.DEBUG)) {
-                Log.d(
-                    FIELD_TAG,
-                    "status band=$observedBand " +
-                        "l5=${GnssBandClassifier.l5SignalCount(carrierFrequenciesHz)} " +
-                        "usedInFix=${carrierFrequenciesHz.size} " +
-                        "inView=$satellitesInView",
-                )
+                Log.d(FIELD_TAG, "status band=$observedBand ${observedSignal.describe()}")
             }
         }
 
@@ -74,8 +75,7 @@ class AndroidGpsLocationClient internal constructor(
                 val sample = location.toDomainSample(
                     receivedElapsedMillis = receivedElapsedMillis,
                     band = band,
-                    l5SignalCount = if (fresh) observedL5Count else null,
-                    satellitesUsedInFix = if (fresh) observedUsedInFix else null,
+                    signal = if (fresh) observedSignal else null,
                 )
                 if (sample == null) logDroppedFix(location) else logFieldQuality(sample)
                 sample?.let { trySend(it) }
@@ -142,16 +142,30 @@ class AndroidGpsLocationClient internal constructor(
                 "fix band=${sample.band} accuracy=${sample.accuracyMeters}m " +
                     "speed=${sample.speedMetersPerSecond} " +
                     "speedAccuracy=${sample.speedAccuracyMetersPerSecond} " +
-                    "l5=${sample.l5SignalCount} usedInFix=${sample.satellitesUsedInFix} " +
-                    "mock=${sample.isMock}",
+                    "${sample.signal.describe()} mock=${sample.isMock}",
             )
         }
     }
 }
 
-/** Reports how many satellites are visible and the carrier frequencies used in the fix. */
+/**
+ * One satellite-status observation, as the platform reported it.
+ *
+ * [satellitesUsedInFix] counts what the receiver used. [carrierFrequenciesUsedInFix] holds only
+ * those of them whose carrier frequency is readable, which is a strict subset and on some
+ * devices an empty one, so the two must never be confused: a position exists precisely when
+ * satellites were used, whatever their frequencies say.
+ */
+internal data class GnssObservation(
+    val satellitesInView: Int,
+    val satellitesUsedInFix: Int,
+    val carrierFrequenciesUsedInFix: List<Float>,
+    val cn0UsedDbHz: List<Float>,
+    val cn0InViewDbHz: List<Float>,
+)
+
 internal fun interface GnssStatusListener {
-    fun onSatelliteStatus(satellitesInView: Int, carrierFrequenciesUsedInFix: List<Float>)
+    fun onSatelliteStatus(observation: GnssObservation)
 }
 
 internal interface GpsLocationSource {
@@ -204,10 +218,7 @@ private class LocationManagerGpsLocationSource(
     override fun registerGnssStatus(listener: GnssStatusListener, looper: Looper) {
         val callback = object : GnssStatus.Callback() {
             override fun onSatelliteStatusChanged(status: GnssStatus) {
-                listener.onSatelliteStatus(
-                    satellitesInView = status.satelliteCount,
-                    carrierFrequenciesUsedInFix = status.carrierFrequenciesUsedInFix(),
-                )
+                listener.onSatelliteStatus(status.toObservation())
             }
         }
         gnssCallbacks[listener] = callback
@@ -220,26 +231,65 @@ private class LocationManagerGpsLocationSource(
 }
 
 /**
- * Carrier frequency is only readable from API 26; on older devices this is empty and the
- * band stays Unknown, which the engine treats exactly as single-band.
+ * Reads the whole constellation in one pass.
+ *
+ * Carrier frequency is only readable from API 26, and not for every satellite even then, so the
+ * frequency list is a subset of what was used and the used count is read from `usedInFix` alone.
+ * Carrier-to-noise density has been readable since API 24, and a zero or non-finite value means
+ * the receiver did not report one rather than a signal of zero strength.
  */
-private fun GnssStatus.carrierFrequenciesUsedInFix(): List<Float> {
-    if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return emptyList()
-
+private fun GnssStatus.toObservation(): GnssObservation {
     val frequencies = ArrayList<Float>(satelliteCount)
+    val usedCn0 = ArrayList<Float>(satelliteCount)
+    val inViewCn0 = ArrayList<Float>(satelliteCount)
+    var usedInFixCount = 0
+    val canReadFrequency = Build.VERSION.SDK_INT >= Build.VERSION_CODES.O
+
     for (index in 0 until satelliteCount) {
+        val carrierToNoise = getCn0DbHz(index)
+        val reportedCarrierToNoise = carrierToNoise.isFinite() && carrierToNoise > 0f
+        if (reportedCarrierToNoise) inViewCn0 += carrierToNoise
         if (!usedInFix(index)) continue
-        if (!hasCarrierFrequencyHz(index)) continue
-        frequencies += getCarrierFrequencyHz(index)
+        usedInFixCount++
+        if (reportedCarrierToNoise) usedCn0 += carrierToNoise
+        if (canReadFrequency && hasCarrierFrequencyHz(index)) {
+            frequencies += getCarrierFrequencyHz(index)
+        }
     }
-    return frequencies
+
+    return GnssObservation(
+        satellitesInView = satelliteCount,
+        satellitesUsedInFix = usedInFixCount,
+        carrierFrequenciesUsedInFix = frequencies,
+        cn0UsedDbHz = usedCn0,
+        cn0InViewDbHz = inViewCn0,
+    )
+}
+
+private fun List<Float>.medianOrNull(): Double? {
+    if (isEmpty()) return null
+    val sorted = sorted()
+    val middle = sorted.size / 2
+    return if (sorted.size % 2 == 1) {
+        sorted[middle].toDouble()
+    } else {
+        (sorted[middle - 1] + sorted[middle]) / 2.0
+    }
+}
+
+/** Compact, log-safe rendering; never a coordinate. */
+private fun SignalQuality?.describe(): String = if (this == null) {
+    "signal=none"
+} else {
+    "usedInFix=$satellitesUsedInFix inView=$satellitesInView l5=$l5SignalCount " +
+        "cn0Used=${medianCn0UsedDbHz?.let { "%.1f".format(it) } ?: "-"} " +
+        "cn0View=${medianCn0InViewDbHz?.let { "%.1f".format(it) } ?: "-"}"
 }
 
 private fun Location.toDomainSample(
     receivedElapsedMillis: Long,
     band: LocationSample.Band,
-    l5SignalCount: Int? = null,
-    satellitesUsedInFix: Int? = null,
+    signal: SignalQuality? = null,
 ): LocationSample? {
     if (!hasAccuracy()) return null
 
@@ -273,8 +323,7 @@ private fun Location.toDomainSample(
         utcMillis = time.takeIf { it > 0 },
         bearingDegrees = if (hasBearing()) bearing.toDouble().takeIf { it.isFinite() && it in 0.0..360.0 } else null,
         altitudeMeters = if (hasAltitude()) altitude.takeIf { it.isFinite() } else null,
-        satellitesUsedInFix = satellitesUsedInFix,
-        l5SignalCount = l5SignalCount,
+        signal = signal,
     )
 }
 

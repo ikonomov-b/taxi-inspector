@@ -121,6 +121,17 @@ fun MeterRoute(
         }
     }
 
+    // The receiver is idle until a ride starts, so warming it up while the meter is on screen is
+    // what makes the first minute of a trip billable instead of a cold acquisition. It gives the
+    // engine nothing: the service's subscription is still the only source of a billable fix.
+    val gpsWarmUp = remember(application) { application.appContainer.gpsWarmUp }
+    LaunchedEffect(lifecycleOwner, gpsWarmUp, state.isRideActive) {
+        if (state.isRideActive) return@LaunchedEffect
+        lifecycleOwner.lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
+            gpsWarmUp.keepWarm()
+        }
+    }
+
     LaunchedEffect(state.message) {
         if (state.message != null) {
             delay(MESSAGE_VISIBLE_MILLIS)

@@ -24,6 +24,7 @@ The safety priority is explainability: uncertain GPS data freezes billing rather
 | `development-environment.md` | Build/tooling work | Verified Android Studio/JBR/SDK paths and local setup. |
 | `gps-fidelity-inspection-and-plan.md` | GPS, distance, or fare-attribution work | The mode-S engine contract as built, its measured residuals, and the remaining robustness plan. Authoritative for engine behaviour until the design document is rewritten. |
 | `field-validation.md` | Recording or analysing a real trip | How to switch tracing on, what the files hold, how to pull them, and the Locus Map comparison procedure. |
+| `gps-reception.md` | Reception, antennas, phone placement, acquisition | What was measured on real hardware, what limits reception, and how to compare two placements with numbers. |
 
 `build-status.md` is the only live implementation-status document. This index intentionally does not duplicate phase completion, verification results, or current risks.
 
@@ -37,7 +38,7 @@ The safety priority is explainability: uncertain GPS data freezes billing rather
 | Clock boundary | `app/src/main/java/com/taxiinspector/core/time/` | Monotonic elapsed time for billing and UTC time for history. |
 | Pure fare/session domain | `app/src/main/java/com/taxiinspector/ride/` | Tariff, `TaxiCompany` labels and their name-key rule, fare calculation, state models, GPS inputs, and `RideEngine`. Must stay Android-free. |
 | Local persistence | `app/src/main/java/com/taxiinspector/data/rides/` | Room entities, mappings, DAO, database, forward migrations, repository, and app container. |
-| GPS location adapter | `app/src/main/java/com/taxiinspector/data/location/` | Android-free `LocationClient` boundary, the `LocationManager.GPS_PROVIDER` adapter, and the `GnssStatus` carrier-frequency band classifier. |
+| GPS location adapter | `app/src/main/java/com/taxiinspector/data/location/` | Android-free `LocationClient` boundary, the `LocationManager.GPS_PROVIDER` adapter on a dedicated callback thread, the `GnssStatus` carrier-frequency band classifier and signal-quality reading, and `GpsWarmUp`, which keeps the receiver tracking before a ride starts without giving the engine anything. |
 | Debug ride trace | `app/src/main/java/com/taxiinspector/trace/` and `data/trace/` | Android-free GPX/CSV/metadata writers and the recorder boundary, plus the file recorder and the store that owns the trace directory and the opt-in switch. Debug builds only, off until switched on, compiled out of release. |
 | Foreground tracking | `app/src/main/java/com/taxiinspector/tracking/` | Non-sticky service, serialized ride owner, commands, notifications, prerequisite checks, ownership binding, and recovery coordination. |
 | Application UI | `app/src/main/java/com/taxiinspector/ui/` | `TaxiInspectorApp`, navigation, theme, shared display formatting, Meter, Taxi companies, Company editor, History, and Ride Detail. UI state is immutable; History and the company flow observe Room and every destructive action is confirmed, while Meter renders state and sends commands without owning a ride or reading location. `ui/tariff/` is the parked anonymous single-tariff variant: it builds and is tested, but nothing navigates to it. |
@@ -65,7 +66,7 @@ Compose UI → ride domain ← tracking service
 - `trace` is pure Kotlin and only formats what `ride` decided; it never decides anything.
 - `data` adapts Room and, later, Android location.
 - `tracking` serializes all running-session mutations.
-- `ui` renders state and sends actions; it never calculates fares or requests locations directly.
+- `ui` renders state and sends actions, and never calculates a fare. It requests no position that can reach one: the meter screen holds a discarding subscription to keep the receiver warm before Start (see `gps-reception.md`), and the foreground service's stream remains the only source of a billable fix.
 
 This describes the intended end state. Consult the source index and `build-status.md` before assuming a target package or class exists.
 

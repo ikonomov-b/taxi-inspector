@@ -17,6 +17,8 @@ data class MeterUiState(
     val selectedCompanyId: String? = null,
     val status: MeterStatus = MeterStatus.CompanyNeeded,
     val canStart: Boolean = false,
+    /** True while a ride owns the meter, so the screen knows not to warm up the receiver. */
+    val isRideActive: Boolean = false,
     /** False while any ride is active, because a ride locks its company at Start. */
     val canManageCompanies: Boolean = true,
     val isCompanySelectorVisible: Boolean = false,

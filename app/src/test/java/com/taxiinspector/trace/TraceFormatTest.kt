@@ -4,6 +4,7 @@ import com.taxiinspector.core.decimal.DecimalAmount
 import com.taxiinspector.ride.LocationSample
 import com.taxiinspector.ride.MotionState
 import com.taxiinspector.ride.RideDecision
+import com.taxiinspector.ride.SignalQuality
 import com.taxiinspector.ride.Tariff
 import com.taxiinspector.ride.TrackingStatus
 import java.io.ByteArrayInputStream
@@ -47,8 +48,13 @@ class TraceFormatTest {
         utcMillis = 1_789_043_708_789,
         bearingDegrees = 271.5,
         altitudeMeters = 550.25,
-        satellitesUsedInFix = 14,
-        l5SignalCount = 6,
+        signal = SignalQuality(
+            satellitesInView = 22,
+            satellitesUsedInFix = 14,
+            l5SignalCount = 6,
+            medianCn0UsedDbHz = 38.5,
+            medianCn0InViewDbHz = 31.25,
+        ),
     )
 
     private fun row(
@@ -83,7 +89,14 @@ class TraceFormatTest {
             row(),
             row(type = TraceRow.Type.Tick, sample = null, decision = null),
             row(type = TraceRow.Type.Command, sample = null, decision = null, commandLabel = "Start"),
-            row(sample = fix.copy(speedMetersPerSecond = null, utcMillis = null, altitudeMeters = null)),
+            row(
+                sample = fix.copy(
+                    speedMetersPerSecond = null,
+                    utcMillis = null,
+                    altitudeMeters = null,
+                    signal = null,
+                ),
+            ),
         )
 
         rows.forEach { assertEquals(columns, TraceCsv.row(it).split(",").size) }
@@ -100,6 +113,12 @@ class TraceFormatTest {
         assertEquals("4.500", fields[header.indexOf("accuracyM")])
         assertEquals("Dual", fields[header.indexOf("band")])
         assertEquals("6", fields[header.indexOf("l5")])
+        // The count the receiver used, distinct from the readable-frequency subset that used to
+        // be reported here and could read zero for a position that existed.
+        assertEquals("14", fields[header.indexOf("usedInFix")])
+        assertEquals("22", fields[header.indexOf("inView")])
+        assertEquals("38.500", fields[header.indexOf("cn0Used")])
+        assertEquals("31.250", fields[header.indexOf("cn0View")])
         assertEquals("ClosedDistance", fields[header.indexOf("reason")])
         assertEquals("Distance", fields[header.indexOf("billedAs")])
         assertEquals("24.125", fields[header.indexOf("chordM")])

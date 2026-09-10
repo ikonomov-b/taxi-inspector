@@ -162,6 +162,66 @@ class AndroidGpsLocationClientTest {
     }
 
     @Test
+    fun theUsedInFixCountIsTheReceiversOwnAndNotTheReadableFrequencySubset() = runBlocking {
+        val source = FakeGpsLocationSource()
+        val client = AndroidGpsLocationClient(source) { 2_000L }
+        val received = Channel<LocationSample>(capacity = 1)
+        val collection = launch(start = CoroutineStart.UNDISPATCHED) {
+            client.locationSamples().collect { received.send(it) }
+        }
+        source.awaitSubscription()
+
+        // Nine satellites solved the fix; only two of them report a carrier frequency. Counting
+        // the frequency list said two, and on the hardware this was measured on it said zero
+        // for positions that plainly existed, since none can be solved from no satellites.
+        source.emitGnssStatus(
+            carrierFrequenciesHz = List(2) { L5_HZ },
+            satellitesInView = 21,
+            satellitesUsedInFix = 9,
+            cn0UsedDbHz = listOf(30f, 34f, 38f, 44f),
+            cn0InViewDbHz = listOf(18f, 22f, 30f, 34f, 38f, 44f),
+        )
+        source.emit(gpsFix())
+
+        val signal = requireNotNull(withTimeout(1_000) { received.receive() }.signal)
+        assertEquals(9, signal.satellitesUsedInFix)
+        assertEquals(21, signal.satellitesInView)
+        assertEquals(2, signal.l5SignalCount)
+        // Medians, so one strong or one dead satellite cannot move the placement metric far.
+        assertEquals(36.0, requireNotNull(signal.medianCn0UsedDbHz), 0.001)
+        assertEquals(32.0, requireNotNull(signal.medianCn0InViewDbHz), 0.001)
+
+        collection.cancelAndJoin()
+    }
+
+    @Test
+    fun aReceiverThatReportsNoSignalStrengthLeavesTheMedianAbsentRatherThanZero() = runBlocking {
+        val source = FakeGpsLocationSource()
+        val client = AndroidGpsLocationClient(source) { 2_000L }
+        val received = Channel<LocationSample>(capacity = 1)
+        val collection = launch(start = CoroutineStart.UNDISPATCHED) {
+            client.locationSamples().collect { received.send(it) }
+        }
+        source.awaitSubscription()
+
+        // A missing carrier-to-noise reading is not a signal of zero strength, and averaging it
+        // in as one would make a placement look worse than it is.
+        source.emitGnssStatus(
+            carrierFrequenciesHz = List(6) { L1_HZ },
+            satellitesInView = 8,
+            satellitesUsedInFix = 6,
+        )
+        source.emit(gpsFix())
+
+        val signal = requireNotNull(withTimeout(1_000) { received.receive() }.signal)
+        assertEquals(6, signal.satellitesUsedInFix)
+        assertNull(signal.medianCn0UsedDbHz)
+        assertNull(signal.medianCn0InViewDbHz)
+
+        collection.cancelAndJoin()
+    }
+
+    @Test
     fun aBandObservedTooLongBeforeAFixIsNotAttachedToIt() = runBlocking {
         val source = FakeGpsLocationSource()
         var elapsedMillis = 0L
@@ -288,10 +348,26 @@ class AndroidGpsLocationClientTest {
             removedGnssListener = listener
         }
 
-        fun emitGnssStatus(carrierFrequenciesHz: List<Float>) {
+        /**
+         * [carrierFrequenciesHz] is deliberately allowed to be shorter than
+         * [satellitesUsedInFix]: on real hardware the frequency is readable for only some of
+         * the satellites a fix used, which is what made the old count untrustworthy.
+         */
+        fun emitGnssStatus(
+            carrierFrequenciesHz: List<Float>,
+            satellitesInView: Int = carrierFrequenciesHz.size,
+            satellitesUsedInFix: Int = carrierFrequenciesHz.size,
+            cn0UsedDbHz: List<Float> = emptyList(),
+            cn0InViewDbHz: List<Float> = emptyList(),
+        ) {
             checkNotNull(gnssListener).onSatelliteStatus(
-                satellitesInView = carrierFrequenciesHz.size,
-                carrierFrequenciesUsedInFix = carrierFrequenciesHz,
+                GnssObservation(
+                    satellitesInView = satellitesInView,
+                    satellitesUsedInFix = satellitesUsedInFix,
+                    carrierFrequenciesUsedInFix = carrierFrequenciesHz,
+                    cn0UsedDbHz = cn0UsedDbHz,
+                    cn0InViewDbHz = cn0InViewDbHz,
+                ),
             )
         }
 

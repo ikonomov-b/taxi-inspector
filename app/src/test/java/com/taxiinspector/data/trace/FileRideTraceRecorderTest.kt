@@ -212,8 +212,13 @@ class FileRideTraceRecorderTest {
         speedAccuracyMetersPerSecond = 0.5,
         utcMillis = 12_000 + elapsedMillis,
         altitudeMeters = 550.0,
-        satellitesUsedInFix = 14,
-        l5SignalCount = 6,
+        signal = com.taxiinspector.ride.SignalQuality(
+            satellitesInView = 20,
+            satellitesUsedInFix = 14,
+            l5SignalCount = 6,
+            medianCn0UsedDbHz = 40.0,
+            medianCn0InViewDbHz = 33.0,
+        ),
     )
 
     private companion object {

@@ -249,6 +249,7 @@ class MeterViewModel(
             selectedCompanyId = selected?.id?.takeIf { ride == null },
             status = statusOf(selected, ride, local.environment),
             canStart = selected != null && ride == null,
+            isRideActive = ride != null,
             canManageCompanies = ride == null,
             isCompanySelectorVisible = local.isCompanySelectorVisible && ride == null,
             isDiscardConfirmationVisible = local.isDiscardConfirmationVisible && ride != null,

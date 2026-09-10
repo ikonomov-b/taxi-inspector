@@ -58,8 +58,17 @@ object TraceGpx {
                 appendLine(element("speedAccMps", String.format(Locale.ROOT, "%.3f", it)))
             }
             appendLine(element("band", sample.band.name))
-            sample.l5SignalCount?.let { appendLine(element("l5", it.toString())) }
-            sample.satellitesUsedInFix?.let { appendLine(element("usedInFix", it.toString())) }
+            sample.signal?.let { signal ->
+                appendLine(element("l5", signal.l5SignalCount.toString()))
+                appendLine(element("usedInFix", signal.satellitesUsedInFix.toString()))
+                appendLine(element("inView", signal.satellitesInView.toString()))
+                signal.medianCn0UsedDbHz?.let {
+                    appendLine(element("cn0Used", String.format(Locale.ROOT, "%.1f", it)))
+                }
+                signal.medianCn0InViewDbHz?.let {
+                    appendLine(element("cn0View", String.format(Locale.ROOT, "%.1f", it)))
+                }
+            }
             appendLine(element("mock", sample.isMock.toString()))
             row.decision?.let {
                 appendLine(element("reason", it.reason.name))

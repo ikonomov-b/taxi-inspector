@@ -6,6 +6,7 @@ import com.taxiinspector.BuildConfig
 import com.taxiinspector.core.time.AndroidClock
 import com.taxiinspector.core.time.Clock
 import com.taxiinspector.data.location.AndroidGpsLocationClient
+import com.taxiinspector.data.location.GpsWarmUp
 import com.taxiinspector.data.location.LocationClient
 import com.taxiinspector.data.trace.FileRideTraceRecorder
 import com.taxiinspector.data.trace.RideTraceStore
@@ -24,6 +25,12 @@ class AppContainer(context: Context) {
     val rideRepository: RoomRideRepository = RoomRideRepository(database.rideDao())
     val locationClient: LocationClient = AndroidGpsLocationClient(context.applicationContext)
     val clock: Clock = AndroidClock
+
+    /**
+     * Held here rather than by the service, because its whole purpose is to run before a ride
+     * exists. It gives the engine nothing; see [GpsWarmUp].
+     */
+    val gpsWarmUp: GpsWarmUp = GpsWarmUp(locationClient)
 
     val traceStore: RideTraceStore = RideTraceStore(context.applicationContext)
 

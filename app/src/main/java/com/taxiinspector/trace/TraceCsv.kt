@@ -9,7 +9,8 @@ import java.util.Locale
 object TraceCsv {
     const val HEADER: String =
         "seq,type,utcMillis,fixElapsedMillis,receivedElapsedMillis,lat,lon,altM,accuracyM," +
-            "speedMps,speedAccMps,bearingDeg,band,l5,usedInFix,mock,command,reason,chordM," +
+            "speedMps,speedAccMps,bearingDeg,band,l5,usedInFix,inView,cn0Used,cn0View," +
+            "mock,command,reason,chordM," +
             "significantM,excessSpeedMps,baselineAgeMs,deltaMs,billedAs,distanceM,timeMs," +
             "status,motion,total"
 
@@ -25,20 +26,25 @@ object TraceCsv {
             // Six decimal places is about 0.1 m at this latitude, finer than any fix.
             sample?.latitude.coordinate(),
             sample?.longitude.coordinate(),
-            sample?.altitudeMeters.metres(),
-            sample?.accuracyMeters.metres(),
-            sample?.speedMetersPerSecond.metres(),
-            sample?.speedAccuracyMetersPerSecond.metres(),
-            sample?.bearingDegrees.metres(),
+            sample?.altitudeMeters.threeDecimals(),
+            sample?.accuracyMeters.threeDecimals(),
+            sample?.speedMetersPerSecond.threeDecimals(),
+            sample?.speedAccuracyMetersPerSecond.threeDecimals(),
+            sample?.bearingDegrees.threeDecimals(),
             sample?.band?.name.orEmpty(),
-            sample?.l5SignalCount.orEmpty(),
-            sample?.satellitesUsedInFix.orEmpty(),
+            sample?.signal?.l5SignalCount.orEmpty(),
+            // The count the receiver used, not the subset whose carrier frequency is readable.
+            sample?.signal?.satellitesUsedInFix.orEmpty(),
+            sample?.signal?.satellitesInView.orEmpty(),
+            // Carrier-to-noise density in dB-Hz: the number that tells one placement from another.
+            sample?.signal?.medianCn0UsedDbHz.threeDecimals(),
+            sample?.signal?.medianCn0InViewDbHz.threeDecimals(),
             sample?.isMock?.toString().orEmpty(),
             row.commandLabel.orEmpty(),
             decision?.reason?.name.orEmpty(),
-            decision?.chordMeters.metres(),
-            decision?.significantMeters.metres(),
-            decision?.excessSpeedMetersPerSecond.metres(),
+            decision?.chordMeters.threeDecimals(),
+            decision?.significantMeters.threeDecimals(),
+            decision?.excessSpeedMetersPerSecond.threeDecimals(),
             decision?.baselineAgeMillis.orEmpty(),
             decision?.deltaMillis.orEmpty(),
             decision?.billedAs?.name.orEmpty(),
@@ -55,6 +61,6 @@ object TraceCsv {
     private fun Double?.coordinate(): String =
         if (this == null) "" else String.format(Locale.ROOT, "%.7f", this)
 
-    private fun Double?.metres(): String =
+    private fun Double?.threeDecimals(): String =
         if (this == null) "" else String.format(Locale.ROOT, "%.3f", this)
 }

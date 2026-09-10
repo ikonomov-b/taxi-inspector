@@ -181,6 +181,33 @@ def main(argv=None):
         # deadband at all, so the two only compare fairly over intervals that moved.
 
     print()
+    print("reception (compare one phone placement with another)")
+    accuracies = [number(r["accuracyM"]) for r in fixes if r["accuracyM"]]
+    if accuracies:
+        accuracies.sort()
+        billable = sum(1 for a in accuracies if a <= 20)
+        print(f"  accuracy  min/median/max   {accuracies[0]:.0f} / "
+              f"{accuracies[len(accuracies) // 2]:.0f} / {accuracies[-1]:.0f} m")
+        print(f"  fixes at or under 20 m     {billable} of {len(accuracies)}"
+              f" ({billable / len(accuracies):.0%}) -- only these can bill")
+    for label, column in (("used in fix", "usedInFix"), ("in view", "inView")):
+        counts = [number(r[column]) for r in fixes if r.get(column)]
+        if counts:
+            print(f"  satellites {label:<12}   min {min(counts):.0f}  median "
+                  f"{sorted(counts)[len(counts) // 2]:.0f}  max {max(counts):.0f}")
+    # Carrier-to-noise density is the metric that separates a good mount from a bad one. A few
+    # dB here is the difference between an athermic windscreen and its transponder patch.
+    for label, column in (("used", "cn0Used"), ("in view", "cn0View")):
+        values = [number(r[column]) for r in fixes if r.get(column)]
+        if values:
+            values.sort()
+            print(f"  C/N0 {label:<8} dB-Hz     min {values[0]:.1f}  median "
+                  f"{values[len(values) // 2]:.1f}  max {values[-1]:.1f}")
+    bands = Counter(r["band"] for r in fixes if r.get("band"))
+    if bands:
+        print("  band                       " + "  ".join(f"{b}={n}" for b, n in bands.most_common()))
+
+    print()
     print("what the engine did with each fix")
     print("  reason                fixes   chord it measured but did not bill as distance")
     counts = Counter(row["reason"] for row in fixes)
