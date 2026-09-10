@@ -12,61 +12,67 @@
 
     <path
         android:fillColor="@color/cab_yellow"
-        android:strokeColor="@color/cap_crown_edge"
+        android:strokeColor="@color/checker_band_edge"
         android:strokeWidth="1"
-        android:pathData="M32,52 L32,38 A22,15 0 0 1 76,38 L76,52 Z" />
+        android:pathData="M22,46L86,46L86,62L22,62Z" />
+    <path
+        android:fillColor="@color/checker_dark"
+        android:pathData="M30,46L38,46L38,54L30,54Z M46,46L54,46L54,54L46,54Z M62,46L70,46L70,54L62,54Z M78,46L86,46L86,54L78,54Z M22,54L30,54L30,62L22,62Z M38,54L46,54L46,62L38,62Z M54,54L62,54L62,62L54,62Z M70,54L78,54L78,62L70,62Z" />
+
+    <path
+        android:fillColor="#000000"
+        android:fillAlpha="0.3"
+        android:pathData="M40,76 A20,6 0 1 0 80,76 A20,6 0 1 0 40,76 Z" />
+
+    <group android:rotation="45" android:pivotX="46" android:pivotY="48">
+        <path
+            android:fillColor="@color/loupe_brass"
+            android:strokeColor="@color/loupe_bevel"
+            android:strokeWidth="0.8"
+            android:pathData="M63,44.5L97,44.5L97,51.5L63,51.5Z" />
+        <path
+            android:fillColor="@color/loupe_brass"
+            android:strokeColor="@color/loupe_bevel"
+            android:strokeWidth="0.8"
+            android:pathData="M94,48 A4,4 0 1 0 102,48 A4,4 0 1 0 94,48 Z" />
+    </group>
 
     <path
         android:fillColor="#00000000"
-        android:strokeColor="@color/cap_seam"
-        android:strokeWidth="0.8"
-        android:strokeAlpha="0.6"
-        android:pathData="M54,29 Q44,40 38,52" />
+        android:strokeColor="#000000"
+        android:strokeWidth="2"
+        android:strokeAlpha="0.25"
+        android:pathData="M24,48 A22,22 0 1 0 68,48 A22,22 0 1 0 24,48 Z" />
     <path
         android:fillColor="#00000000"
-        android:strokeColor="@color/cap_seam"
-        android:strokeWidth="0.8"
-        android:strokeAlpha="0.6"
-        android:pathData="M54,29 Q48,42 46,52" />
+        android:strokeColor="@color/loupe_brass"
+        android:strokeWidth="5"
+        android:pathData="M28,48 A18,18 0 1 0 64,48 A18,18 0 1 0 28,48 Z" />
     <path
         android:fillColor="#00000000"
-        android:strokeColor="@color/cap_seam"
-        android:strokeWidth="0.8"
-        android:strokeAlpha="0.6"
-        android:pathData="M54,29 Q60,42 62,52" />
-    <path
-        android:fillColor="#00000000"
-        android:strokeColor="@color/cap_seam"
-        android:strokeWidth="0.8"
-        android:strokeAlpha="0.6"
-        android:pathData="M54,29 Q64,40 70,52" />
-
-    <path
-        android:fillColor="@color/paper"
-        android:strokeColor="@color/cap_band_edge"
+        android:strokeColor="@color/loupe_bevel"
         android:strokeWidth="1"
-        android:pathData="M30,52 L78,52 L78,64 L30,64 Z" />
-
+        android:strokeAlpha="0.6"
+        android:pathData="M30.5,48 A15.5,15.5 0 1 0 61.5,48 A15.5,15.5 0 1 0 30.5,48 Z" />
     <path
-        android:fillColor="@color/cap_check_dark"
-        android:pathData="M30,52L36,52L36,58L30,58Z M42,52L48,52L48,58L42,58Z M54,52L60,52L60,58L54,58Z M66,52L72,52L72,58L66,58Z M36,58L42,58L42,64L36,64Z M48,58L54,58L54,64L48,64Z M60,58L66,58L66,64L60,64Z M72,58L78,58L78,64L72,64Z" />
-
-    <path
-        android:fillColor="@color/cap_peak"
-        android:strokeColor="@color/cap_peak_edge"
+        android:fillColor="#00000000"
+        android:strokeColor="@color/loupe_brass_light"
         android:strokeWidth="1.2"
-        android:pathData="M24,64 L84,64 Q54,82 24,64 Z" />
-    <path
-        android:fillColor="#00000000"
-        android:strokeColor="@color/paper"
-        android:strokeWidth="1.5"
-        android:strokeAlpha="0.3"
+        android:strokeAlpha="0.6"
         android:strokeLineCap="round"
-        android:pathData="M34,68 Q54,76 74,68" />
+        android:pathData="M34,38.25 A18,18 0 0 1 49,31.5" />
 
-    <path
-        android:fillColor="@color/cap_button"
-        android:strokeColor="@color/cap_button_edge"
-        android:strokeWidth="0.5"
-        android:pathData="M50.8,29 A3.2,3.2 0 1 0 57.2,29 A3.2,3.2 0 1 0 50.8,29 Z" />
+    <group>
+        <clip-path android:pathData="M31,48 A15,15 0 1 0 61,48 A15,15 0 1 0 31,48 Z" />
+        <path
+            android:fillColor="@color/cab_yellow"
+            android:pathData="M31,33L61,33L61,63L31,63Z" />
+        <path
+            android:fillColor="@color/checker_dark"
+            android:pathData="M31,43L41,43L41,53L31,53Z M41,33L51,33L51,43L41,43Z M41,53L51,53L51,63L41,63Z M51,43L61,43L61,53L51,53Z" />
+        <path
+            android:fillColor="#FFFFFF"
+            android:fillAlpha="0.22"
+            android:pathData="M36,42 A4,4 0 1 0 44,42 A4,4 0 1 0 36,42 Z" />
+    </group>
 </vector>

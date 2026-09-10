@@ -7,8 +7,17 @@
     android:viewportHeight="108">
     <path
         android:fillColor="#FF000000"
-        android:pathData="M32,52 L32,38 A22,15 0 0 1 76,38 L76,52 L78,52 L78,64 L84,64 Q54,82 24,64 L30,64 L30,52 Z" />
+        android:pathData="M22,46L86,46L86,62L22,62Z" />
     <path
         android:fillColor="#FF000000"
-        android:pathData="M50.8,29 A3.2,3.2 0 1 0 57.2,29 A3.2,3.2 0 1 0 50.8,29 Z" />
+        android:fillType="evenOdd"
+        android:pathData="M28,48 A18,18 0 1 0 64,48 A18,18 0 1 0 28,48 Z M32,48 A14,14 0 1 0 60,48 A14,14 0 1 0 32,48 Z" />
+    <group android:rotation="45" android:pivotX="46" android:pivotY="48">
+        <path
+            android:fillColor="#FF000000"
+            android:pathData="M63,44.5L97,44.5L97,51.5L63,51.5Z" />
+        <path
+            android:fillColor="#FF000000"
+            android:pathData="M94,48 A4,4 0 1 0 102,48 A4,4 0 1 0 94,48 Z" />
+    </group>
 </vector>
