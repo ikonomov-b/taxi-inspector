@@ -3,6 +3,7 @@ package com.taxiinspector.data.location
 import android.location.Location
 import android.location.LocationListener
 import android.location.LocationManager
+import android.os.Looper
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import com.taxiinspector.ride.LocationSample
 import kotlinx.coroutines.CompletableDeferred
@@ -17,6 +18,7 @@ import kotlinx.coroutines.withTimeoutOrNull
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertNotSame
 import org.junit.Assert.assertSame
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -47,6 +49,13 @@ class AndroidGpsLocationClientTest {
         assertEquals(1_000L, source.requestedMinTimeMillis)
         assertEquals(0f, source.requestedMinDistanceMeters)
         val registeredListener = source.listener
+
+        // Both callbacks share one thread that is not the main looper: the received timestamp a
+        // fix is stamped with decides whether it may bill, so UI work must not be able to delay
+        // it, and sharing the thread is what lets the band carry-forward skip synchronisation.
+        val callbackLooper = requireNotNull(source.requestedLooper)
+        assertNotSame(Looper.getMainLooper(), callbackLooper)
+        assertSame(callbackLooper, source.gnssLooper)
 
         collection.cancelAndJoin()
 
@@ -244,6 +253,8 @@ class AndroidGpsLocationClientTest {
         var removedListener: LocationListener? = null
         var gnssListener: GnssStatusListener? = null
         var removedGnssListener: GnssStatusListener? = null
+        var requestedLooper: Looper? = null
+        var gnssLooper: Looper? = null
         private val subscriptionRequested = CompletableDeferred<Unit>()
 
         override fun isGpsProviderEnabled(): Boolean = isEnabled
@@ -252,10 +263,14 @@ class AndroidGpsLocationClientTest {
             minTimeMillis: Long,
             minDistanceMeters: Float,
             listener: LocationListener,
+            looper: Looper,
         ) {
             requestedMinTimeMillis = minTimeMillis
             requestedMinDistanceMeters = minDistanceMeters
             this.listener = listener
+            // Which thread the platform would deliver on is the adapter's business; the fake
+            // calls back on whichever thread the test emits from.
+            requestedLooper = looper
             subscriptionRequested.complete(Unit)
         }
 
@@ -263,9 +278,10 @@ class AndroidGpsLocationClientTest {
             removedListener = listener
         }
 
-        override fun registerGnssStatus(listener: GnssStatusListener) {
+        override fun registerGnssStatus(listener: GnssStatusListener, looper: Looper) {
             if (failGnssRegistration) throw IllegalStateException("no satellite status here")
             gnssListener = listener
+            gnssLooper = looper
         }
 
         override fun removeGnssStatus(listener: GnssStatusListener) {

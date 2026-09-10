@@ -5,6 +5,41 @@ plugins {
     alias(libs.plugins.ksp)
 }
 
+/**
+ * The version is derived from the git history rather than edited by hand, because a build now
+ * has to be identifiable after the fact: a ride trace records the version that produced it, and
+ * every build calling itself "1.0" made a captured trip impossible to attribute.
+ *
+ * The build id is the commit count, so it is sequential, monotonic on `main`, and identical for
+ * anyone who builds the same commit. The short SHA names the commit and a `.dirty` suffix marks
+ * a tree with uncommitted changes, so a trace can never quietly claim to come from a commit that
+ * does not contain what produced it.
+ */
+fun gitOutput(vararg command: String): String? = runCatching {
+    val execution = providers.exec {
+        commandLine(*command)
+        isIgnoreExitValue = true
+    }
+    execution
+        .takeIf { it.result.get().exitValue == 0 }
+        ?.standardOutput?.asText?.get()?.trim()
+        ?.takeIf { it.isNotEmpty() }
+}.getOrNull()
+
+val baseVersion = "1.0"
+
+// Zero when there is no git history to count, which a source archive or a shallow CI clone has.
+// The version then says so rather than inventing a number: CI checks out with fetch-depth 0.
+val buildId: Int = gitOutput("git", "rev-list", "--count", "HEAD")?.toIntOrNull() ?: 0
+val commitSha: String? = gitOutput("git", "rev-parse", "--short=8", "HEAD")
+val isTreeDirty: Boolean = gitOutput("git", "status", "--porcelain") != null
+
+val appVersionName: String = buildString {
+    append(baseVersion).append('.').append(buildId)
+    commitSha?.let { append('+').append(it) }
+    if (isTreeDirty) append(".dirty")
+}
+
 android {
     namespace = "com.taxiinspector"
     compileSdk = 35
@@ -13,8 +48,11 @@ android {
         applicationId = "com.taxiinspector"
         minSdk = 24
         targetSdk = 35
-        versionCode = 1
-        versionName = "1.0"
+        // Monotonic on main. A shallow clone counts one commit and would produce a lower code
+        // than an installed build, which Android refuses to install over; build from full
+        // history when the artifact is going on a device that already has one.
+        versionCode = buildId.coerceAtLeast(1)
+        versionName = appVersionName
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }

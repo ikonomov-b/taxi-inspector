@@ -12,8 +12,20 @@ serial="$(resolve_target_serial)"
 
 PACKAGE="com.taxiinspector"
 echo "Target device: $serial" >&2
-TRACE_DIR="/sdcard/Android/data/$PACKAGE/files/traces"
-SWITCH="$TRACE_DIR/.tracing-enabled"
+FILES_DIR="/sdcard/Android/data/$PACKAGE/files"
+TRACE_DIR="$FILES_DIR/traces"
+SWITCH="$FILES_DIR/.tracing-enabled"
+
+# The switch has to sit in a directory the app itself created. A directory created here instead
+# belongs to shell, and the app cannot then stat what is inside it, so the switch would be
+# invisible to the process that reads it and every ride would go untraced with no obvious reason.
+require_app_storage() {
+  if ! "$ADB" -s "$serial" shell "[ -d '$FILES_DIR' ]" 2>/dev/null; then
+    echo "The app has not created its storage yet: $FILES_DIR is missing." >&2
+    echo "Open Taxi Inspector once on the device, then run this again." >&2
+    exit 1
+  fi
+}
 
 usage() {
   echo "usage: $(basename "$0") on|off|status" >&2
@@ -24,7 +36,8 @@ usage() {
 
 case "$1" in
   on)
-    "$ADB" -s "$serial" shell "mkdir -p '$TRACE_DIR' && echo 'Delete this file to stop recording ride traces.' > '$SWITCH'"
+    require_app_storage
+    "$ADB" -s "$serial" shell "echo 'Delete this file to stop recording ride traces.' > '$SWITCH'"
     echo "Tracing ON. Every ride started from now writes $TRACE_DIR/<rideId>/."
     ;;
   off)

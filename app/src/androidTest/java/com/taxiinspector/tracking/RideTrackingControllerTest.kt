@@ -294,6 +294,31 @@ class RideTrackingControllerTest {
         assertEquals(listOf("ride-under-test"), trace.deleted.toList())
     }
 
+    @Test
+    fun aHeldFixIsNotWrittenEverySecondAndPauseStillCommitsIt() = runBlocking {
+        useCompany(tariff())
+        val trace = RecordingTrace()
+        val locationClient = FakeLocationClient()
+        val candidate = createController(locationClient = locationClient, trace = trace)
+
+        candidate.dispatch(RideCommand.Start)
+        candidate.awaitActive()
+        locationClient.awaitSubscription()
+        locationClient.emit(gpsSample(1_000))
+        withTimeout(3_000) { repository.observeActiveRide().first { it?.lastBillablePoint != null } }
+
+        // Same position four seconds later: inside the deadband, so only the observed hold
+        // grows. Nothing a recovered ride needs has changed, so Room is left alone.
+        locationClient.emit(gpsSample(5_000))
+        awaitCondition { trace.recorded.contains(RideDecision.Reason.Held.name) }
+        assertEquals(0L, repository.currentActiveRide()?.billedTimeMillis)
+
+        // A deliberate pause commits it, so a hold is never lost on any path the user takes.
+        candidate.dispatch(RideCommand.Pause)
+        withTimeout(3_000) { repository.observeActiveRide().first { it?.phase == RidePhase.Paused } }
+        assertEquals(4_000L, repository.currentActiveRide()?.billedTimeMillis)
+    }
+
     private fun createController(
         locationClient: FakeLocationClient = FakeLocationClient(),
         prerequisites: FakePrerequisites = FakePrerequisites(),

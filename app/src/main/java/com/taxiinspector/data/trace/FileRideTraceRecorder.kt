@@ -1,5 +1,6 @@
 package com.taxiinspector.data.trace
 
+import android.util.Log
 import com.taxiinspector.ride.ActiveRide
 import com.taxiinspector.ride.FareCalculator
 import com.taxiinspector.ride.RideDecision
@@ -47,7 +48,12 @@ class FileRideTraceRecorder(
     init {
         scope.launch {
             for (task in work) {
-                runCatching { task() }
+                // A trace must never throw into a ride, but a swallowed failure looks exactly
+                // like "no trace appeared", which costs a whole field trip to diagnose. So the
+                // ride carries on and the reason is logged. Never a coordinate, only paths.
+                runCatching { task() }.onFailure {
+                    Log.w(TAG, "ride trace write failed: ${it.javaClass.simpleName}: ${it.message}")
+                }
             }
         }
     }
@@ -57,6 +63,8 @@ class FileRideTraceRecorder(
             // Checked once per ride, so a switch flipped mid-trip cannot leave half a trace.
             // Nothing else in here does anything while no ride is open.
             if (!store.isTracingEnabled()) {
+                // Logged so that "why is there no trace" has an answer without reading code.
+                Log.i(TAG, "ride tracing is off; raise it with scripts/trace-toggle.sh on (${store.switchPath})")
                 openRideId = null
                 track = null
                 decisions = null
@@ -87,7 +95,16 @@ class FileRideTraceRecorder(
                     .coerceAtLeast(0)
             } else {
                 directory.deleteRecursively()
-                directory.mkdirs()
+                if (!directory.mkdirs() && !directory.isDirectory) {
+                    // External storage unmounted, or the directory owned by something this app
+                    // cannot write. Silence here would be indistinguishable from tracing being
+                    // switched off.
+                    Log.w(TAG, "cannot create trace directory $directory; this ride is not traced")
+                    openRideId = null
+                    track = null
+                    decisions = null
+                    return@submit
+                }
                 sequence = 0
                 val meta = TraceMeta(
                     rideId = ride.id,
@@ -207,5 +224,8 @@ class FileRideTraceRecorder(
 
     private companion object {
         const val FLUSH_EVERY_ROWS = 10
+
+        /** Field diagnostics for the trace itself; never a coordinate, only paths and reasons. */
+        const val TAG = "TaxiTrace"
     }
 }

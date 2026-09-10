@@ -7,6 +7,7 @@ import android.content.pm.ServiceInfo
 import android.os.Binder
 import android.os.Build
 import android.os.IBinder
+import android.os.PowerManager
 import com.taxiinspector.TaxiInspectorApplication
 import com.taxiinspector.ride.ActiveRide
 import kotlinx.coroutines.flow.StateFlow
@@ -16,6 +17,7 @@ class RideTrackingService : Service(), TrackingHost, ForegroundSession, ServiceT
     private lateinit var commandRouter: RideServiceCommandRouter
     private lateinit var notificationFactory: RideNotificationFactory
     private lateinit var notificationManager: NotificationManager
+    private var wakeLock: PowerManager.WakeLock? = null
     private val binder = LocalBinder()
 
     override fun onCreate() {
@@ -46,6 +48,7 @@ class RideTrackingService : Service(), TrackingHost, ForegroundSession, ServiceT
     }
 
     override fun startPreparing() {
+        acquireWakeLock()
         notificationFactory.createChannel()
         val notification = notificationFactory.starting()
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
@@ -72,11 +75,44 @@ class RideTrackingService : Service(), TrackingHost, ForegroundSession, ServiceT
     }
 
     override fun stop() {
+        releaseWakeLock()
         stopForeground(STOP_FOREGROUND_REMOVE)
+    }
+
+    /**
+     * A foreground service keeps the process alive but does not keep the processor awake, so with
+     * the screen off the ticker and location delivery can both pause in doze. That no longer
+     * changes a fare -- ticks do not bill and the hold is measured on the fix clock -- but it
+     * does put gaps in a ride that came from the device sleeping rather than from reception, and
+     * a field trace cannot tell those apart afterwards.
+     *
+     * Held without a timeout on purpose: its lifetime is bounded by the foreground session, and a
+     * ride may legitimately last hours.
+     */
+    @Suppress("WakelockTimeout")
+    private fun acquireWakeLock() {
+        if (wakeLock?.isHeld == true) return
+        val manager = getSystemService(PowerManager::class.java) ?: return
+        wakeLock = manager
+            .newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, WAKE_LOCK_TAG)
+            .apply {
+                // Not reference counted, so releasing twice is safe and releasing once is enough.
+                setReferenceCounted(false)
+                acquire()
+            }
+    }
+
+    private fun releaseWakeLock() {
+        wakeLock?.takeIf { it.isHeld }?.release()
+        wakeLock = null
     }
 
     override fun stopService() {
         stopSelf()
+    }
+
+    private companion object {
+        const val WAKE_LOCK_TAG = "TaxiInspector:ride"
     }
 
     inner class LocalBinder : Binder(), RideOwnership {

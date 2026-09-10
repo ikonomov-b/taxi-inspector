@@ -1,6 +1,6 @@
 # Taxi Inspector — GPS Fidelity Inspection and Mode-S Implementation Plan
 
-> Status: **sections 4 and 6 implemented; section 5 outstanding except the `LocationSample` fields; section 7 not started**. Written 2026-09-09 against commit `7761412`. The engine (commit 1) and the debug ride trace (commit 3) landed on 2026-09-10, each amendment they needed marked **Amended in implementation** below. Commit 2's remaining robustness work — the callback `HandlerThread`, the wakelock and the Room write cadence — and commit 4's document and script rewrite are still open, so `scripts/check_ride_result.py` still encodes the superseded speed hysteresis and `simulate-drive.sh` fails until it is amended. The fare and GPS contract in `taxi-inspector-design.md` is behind the code; until commit 4 this document is authoritative for engine behaviour, and `field-validation.md` for the trace.
+> Status: **sections 4, 5 and 6 implemented; section 7 not started**. Written 2026-09-09 against commit `7761412`. The engine (commit 1) and the debug ride trace (commit 3) landed on 2026-09-10, each amendment they needed marked **Amended in implementation** below. Commit 2's robustness work landed on the same day. Commit 4's document and script rewrite is still open, so `scripts/check_ride_result.py` still encodes the superseded speed hysteresis and `simulate-drive.sh` fails until it is amended. The fare and GPS contract in `taxi-inspector-design.md` is behind the code; until commit 4 this document is authoritative for engine behaviour, and `field-validation.md` for the trace.
 
 ## 1. Purpose
 
@@ -52,7 +52,9 @@ A throwaway JVM probe drove the current `RideEngine` at 1 Hz with the test tarif
 4. **Outliers are rejected by implied speed** with an accuracy budget, and a relocation is confirmed by two mutually plausible fixes or a streak of three.
 5. **Debug ride trace on by default in debug builds**, compiled out of release, shareable from Ride Detail.
 
-   **Amended in implementation: off by default, opt-in.** A trace holds coordinates, so nothing collects them until asked to, debug build or not. The compile-time gate stays — a release build has the facility compiled out and cannot be switched on at all — and a debug build now needs a switch raised as well. The switch is a marker file, `traces/.tracing-enabled` in the app's own external files directory, rather than a stored setting: it can be flipped over adb without opening the app, it needs no Room migration, and it survives a reboot, because a field trip that goes unrecorded because a toggle reset itself is the one failure this facility cannot afford. `scripts/trace-toggle.sh on|off|status` manages it.
+   **Amended in implementation: off by default, opt-in.** A trace holds coordinates, so nothing collects them until asked to, debug build or not.
+
+   **Corrected the same day, on device.** The switch was first placed *inside* `files/traces/`, which does not work: `adb shell` creating that directory makes it shell-owned, and the app then cannot stat what is inside it, so every ride went untraced while the marker sat there looking correct. It now lives beside the trace directory, at `files/.tracing-enabled`, because `getExternalFilesDir` creates `files/` itself and the app can therefore read a shell-written file in it. `trace-toggle.sh on` refuses outright if `files/` does not exist yet and says to open the app once, rather than creating it and reintroducing the same silent failure. This is exactly the failure the section-6.3 diagnostic below was added to expose, and it exposed it within a minute. The compile-time gate stays — a release build has the facility compiled out and cannot be switched on at all — and a debug build now needs a switch raised as well. The switch is a marker file, `traces/.tracing-enabled` in the app's own external files directory, rather than a stored setting: it can be flipped over adb without opening the app, it needs no Room migration, and it survives a reboot, because a field trip that goes unrecorded because a toggle reset itself is the one failure this facility cannot afford. `scripts/trace-toggle.sh on|off|status` manages it.
 6. **No Room schema change** in this work. Renamed domain fields keep their columns.
 
 ## 4. Engine specification (`app/src/main/java/com/taxiinspector/ride/`)
@@ -261,18 +263,22 @@ Out-of-package fallout (mechanical): `MeterViewModel`, `RideNotificationFactory`
 
 ### 5.1 `data/location/AndroidGpsLocationClient.kt`
 
-- Deliver location and `GnssStatus` callbacks on a dedicated `HandlerThread("TaxiGnss")` created inside `callbackFlow` and quit in `awaitClose`, so UI work cannot skew `receivedElapsedMillis`. `GpsLocationSource.requestGpsUpdates` and `registerGnssStatus` gain a `Looper`/`Handler` parameter; `AndroidGpsLocationClientTest.FakeGpsLocationSource` ignores it. Both callbacks stay on one thread, so the band carry-forward still needs no synchronisation.
+- **Implemented.** Deliver location and `GnssStatus` callbacks on a dedicated `HandlerThread("TaxiGnss")` created inside `callbackFlow` and quit in `awaitClose`, so UI work cannot skew `receivedElapsedMillis`. `AndroidGpsLocationClientTest` asserts that neither callback is registered on the main looper and that both share one thread. `GpsLocationSource.requestGpsUpdates` and `registerGnssStatus` gain a `Looper`/`Handler` parameter; `AndroidGpsLocationClientTest.FakeGpsLocationSource` ignores it. Both callbacks stay on one thread, so the band carry-forward still needs no synchronisation.
 - Map `Location.time` → `utcMillis`, `altitude` and `bearing` when present; extend `GnssStatusListener` with `usedInFixCount` and pass the L5 count through; echo the new fields in `logFieldQuality` (still never coordinates in Logcat).
 
 ### 5.2 `tracking/RideTrackingService.kt`
 
-Hold a `PowerManager.PARTIAL_WAKE_LOCK` (tag `TaxiInspector:ride`, non-reference-counted) from `startPreparing()` until `stop()` and `onDestroy()`. Add `android.permission.WAKE_LOCK` to the manifest. Suppress lint `WakelockTimeout` with a comment: the lock lifetime is bounded by the foreground service, and a ride may legitimately last hours.
+**Implemented**, and its justification has narrowed since the plan was written: ticks no longer bill and the hold is measured on the fix clock, so doze can no longer change a fare. What it protects now is the continuity of the *measurement* — without it a screen-off drive records GPS-Lost stretches caused by the device sleeping, which a trace cannot tell apart from bad reception afterwards.
+
+Hold a `PowerManager.PARTIAL_WAKE_LOCK` (tag `TaxiInspector:ride`, non-reference-counted) from `startPreparing()` until `stop()` and `onDestroy()`. Verified on the emulator: held for the life of a ride, released on Stop. Add `android.permission.WAKE_LOCK` to the manifest. Suppress lint `WakelockTimeout` with a comment: the lock lifetime is bounded by the foreground service, and a ride may legitimately last hours.
 
 ### 5.3 Room write cadence
 
 **Amended in implementation** — F6 lists "Room is written twice per second" and nothing in sections 4–8 acted on it. `RideTrackingController.updateRide` writes on every changed reduce, and both the 1 Hz ticker and the 1 Hz location flow change state, so a ride writes about twice a second for its whole duration; the trace recorder adds its own I/O on top.
 
-Provisional time is now reconstructible: it is `lastAcceptedFix.fix − lastBillablePoint.fix`, and the mapper already commits it into the stored column. So the snapshot only has to be written when something durable changes — a close, a commit, a phase or status change — and a plain hold can be left to the next write. Recovery loses at most the hold since the last write, which is the same bound a service kill already has. Decide this with section 5.2's wakelock, since both change how a long ride behaves in the background.
+**Resolved: durable changes at once, a held fix on a bounded interval.** An earlier draft of this amendment claimed the hold was reconstructible after a process death, from `lastAcceptedFix.fix − lastBillablePoint.fix`. It is not: `toDomain` deliberately returns `lastAcceptedFix = null`, so that a baseline restored without the fix clock it was measured against cannot form a chord across the gap. The stored `idleMillis` is the only record of the hold, so leaving a hold unwritten until the next close would cost a whole stop's waiting time to an unexpected kill.
+
+`RideTrackingController.shouldPersist` therefore writes immediately whenever a phase, status, committed time, distance or baseline changes, and otherwise at most every five seconds. A ride at a light writes ten times less; what a kill can lose is bounded at five seconds of waiting time, in the under-reading direction.
 
 ### 5.4 `tracking/RideTrackingController.kt`
 
@@ -299,6 +305,8 @@ Use `RideEngine.step()` and hand `(input, before, after, decision)` to a `RideTr
 ### 6.3 `data/trace/FileRideTraceRecorder.kt` and `RideTraceStore`
 
 - Directory `filesDir/traces/<rideId>/` holding `track.gpx`, `decisions.csv`, `meta.json`. A single-thread dispatcher with buffered writers, flushed every 5 s or 10 rows so a service kill loses at most a few seconds (itself evidence). The GPX footer is written on ride end; an unterminated trace gets its footer when shared.
+
+  **Amended in implementation: a failure to write must not be silent.** A trace may never throw into a ride, but swallowing the reason makes a storage or ownership problem indistinguishable from tracing being switched off, and the cost of telling those apart is a wasted field trip. Failures, a directory that cannot be created, and tracing being off are all logged under the `TaxiTrace` tag — paths and reasons only, never a coordinate.
 - `RideTraceStore`: `filesFor(rideId)`, `delete(rideId)`, `prune(keepNewest = 30)`. Discard deletes the ride's trace; deleting a saved ride deletes its trace; prune runs at ride start.
 
 ### 6.4 Share from Ride Detail (`ui/history/`)

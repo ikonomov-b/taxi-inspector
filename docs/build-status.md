@@ -20,6 +20,8 @@ The fare engine was replaced on 2026-09-10 with the EU mode-S model specified in
 
 A debug ride trace was added the same day: with an opt-in flag raised, every trip on a debug build writes `track.gpx`, `decisions.csv` and `meta.json` to the app's own external files directory, holding each fix's coordinates and the engine's verdict on it, so a recorded trip can be overlaid on a Locus Map recording and compared. It is off by default and compiled out of release builds entirely. `docs/field-validation.md` is the procedure.
 
+The adapter and service robustness work followed: both GNSS callbacks now arrive on a dedicated thread so UI work cannot skew the received timestamp that decides whether a fix may bill, a ride holds a partial wakelock so a screen-off drive does not record sleep as lost GPS, and a held fix is no longer written to Room twice a second. The app version is now derived from the git history — `versionCode` is the commit count and `versionName` carries the short SHA and a dirty marker — so a captured trace names the build that produced it instead of calling every build 1.0.
+
 Last verified: **2026-09-10**
 
 ```text
@@ -31,7 +33,7 @@ scripts/test-instrumented.sh
 BUILD SUCCESSFUL
 ```
 
-The debug JVM report contains 79 tests, one of them skipped by design (`TraceReplayTest`, which runs only when handed a captured trace), and the API 35 instrumentation report contains 117 Room/location/service/UI tests, with 0 failures and 0 errors. Both flag states were also driven black-box on the API 35 emulator: a full ride with the flag down wrote no files, and the same ride with it raised produced 24 track points, every one carrying a UTC time, which `scripts/compare_tracks.py` then attributed by reason code. Lint reported 0 errors. The preceding 63-test suite also passed on a physical Pixel 8 Pro (Android 17); the History tests, the five fare-boundary tests, the six version-2 migration tests, and the whole company suite have so far run on the API 35 emulator/JVM environment only. A black-box upgrade of the shipped APK over a real version-1 database, and a full simulated drive through the company editor, were also driven through the app's own UI on that emulator; the detail is in the Phase 7A entries below.
+The debug JVM report contains 79 tests, one of them skipped by design (`TraceReplayTest`, which runs only when handed a captured trace), and the API 35 instrumentation report contains 118 Room/location/service/UI tests, with 0 failures and 0 errors. Both flag states were also driven black-box on the API 35 emulator: a full ride with the flag down wrote no files, and the same ride with it raised produced 24 track points, every one carrying a UTC time, which `scripts/compare_tracks.py` then attributed by reason code. Lint reported 0 errors. The preceding 63-test suite also passed on a physical Pixel 8 Pro (Android 17); the History tests, the five fare-boundary tests, the six version-2 migration tests, and the whole company suite have so far run on the API 35 emulator/JVM environment only. A black-box upgrade of the shipped APK over a real version-1 database, and a full simulated drive through the company editor, were also driven through the app's own UI on that emulator; the detail is in the Phase 7A entries below.
 
 ## Phase tracker
 
@@ -84,10 +86,14 @@ The debug JVM report contains 79 tests, one of them skipped by design (`TraceRep
 - A parallel `GnssStatus` subscription carries the latest band observation forward to fixes received within five seconds of it; a stale or absent observation leaves the fix `Unknown`
 - Location collection cancellation unregisters the exact platform listener and the satellite-status callback, and safely tolerates permission revocation
 
+### Build identity
+
+- `app/build.gradle.kts` derives `versionCode` from `git rev-list --count HEAD` and `versionName` as `1.0.<count>+<short sha>[.dirty]`, so two people building one commit get one version and a trace can be attributed to the build that wrote it. CI checks out with `fetch-depth: 0`, since a shallow clone would count one commit.
+
 ### Debug ride trace (debug builds only, off until switched on)
 
 - `trace/`: Android-free `TraceRow`, `TraceCsv`, `TraceGpx` (GPX 1.1 with namespaced extensions), `TraceMeta`, the `RideTraceRecorder` boundary and its release no-op, and an arithmetic ISO-8601 UTC formatter, since `java.time` needs API 26 and `SimpleDateFormat` is not thread-safe
-- `data/trace/RideTraceStore.kt`: the trace directory under the app's own external files directory so `adb pull` reaches it, the `.tracing-enabled` marker file that gates recording, thirty-trace pruning, deletion, and closing a GPX left unterminated by a killed process
+- `data/trace/RideTraceStore.kt`: the trace directory under the app's own external files directory so `adb pull` reaches it, the `.tracing-enabled` marker file that gates recording — beside the trace directory rather than inside it, because a directory created over adb belongs to shell and the app cannot stat what is in it — thirty-trace pruning, deletion, and closing a GPX left unterminated by a killed process
 - `data/trace/FileRideTraceRecorder.kt`: one ordered writer per ride, flushed every ten rows, appending rather than replacing when a paused ride resumes
 - `RideEngine.step()`/`RideDecision`/`RideEngine.constantsForTrace()`: the engine reports what it decided and the thresholds it decided with, so a trace explains itself
 - `ui/history/`: `hasTrace`, Share GPX track and Share full trace, handed out through a non-exported `FileProvider`; deleting a ride deletes its route
@@ -108,8 +114,8 @@ The debug JVM report contains 79 tests, one of them skipped by design (`TraceRep
 
 ### Foreground tracking
 
-- `RideTrackingService`: non-exported location FGS with non-sticky restart policy and local ownership binder
-- `RideTrackingController`: serialized command/location/tick processing and the sole in-memory running-ride owner
+- `RideTrackingService`: non-exported location FGS with non-sticky restart policy, local ownership binder, and a partial wakelock held for the life of a tracked ride so a screen-off drive is not recorded as lost GPS
+- `RideTrackingController`: serialized command/location/tick processing, the sole in-memory running-ride owner, and a write policy that persists anything a recovered ride needs at once while bounding a held fix to one write every five seconds
 - `RideNotificationFactory`: rate-bounded fare/status notification with Pause and Stop & save actions
 - `RideRecoveryCoordinator`: bind-first ownership check followed by atomic interrupted recovery
 

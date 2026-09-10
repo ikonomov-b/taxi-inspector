@@ -59,6 +59,7 @@ internal class RideTrackingController(
     private var locationJob: Job? = null
     private var tickerJob: Job? = null
     private var lastNotificationElapsedMillis: Long? = null
+    private var lastPersistedElapsedMillis: Long? = null
 
     val state: StateFlow<RideTrackingState> = mutableState.asStateFlow()
 
@@ -215,10 +216,34 @@ internal class RideTrackingController(
         trace.record(input, current, updated, decision)
         if (updated == current) return
 
-        repository.updateActiveRide(updated)
         activeRide = updated
         mutableState.value = updated.toTrackingState()
+        if (shouldPersist(current, updated)) {
+            repository.updateActiveRide(updated)
+            lastPersistedElapsedMillis = clock.elapsedRealtimeMillis()
+        }
         updateNotificationIfDue(updated)
+    }
+
+    /**
+     * Anything a recovered ride would be wrong without is written at once. A held fix is not:
+     * inside the deadband the position is unresolved and only the observed hold grows, so a ride
+     * standing at a light used to write the same snapshot twice a second for the whole stop.
+     *
+     * The hold cannot be recomputed after a process death -- a restored baseline deliberately
+     * comes back without the fix clock it was measured against -- so it is not simply dropped
+     * either. Writing it on a bounded interval keeps what an unexpected kill loses to a few
+     * seconds of waiting time, in the under-reading direction, at a tenth of the I/O.
+     */
+    private fun shouldPersist(before: ActiveRide, after: ActiveRide): Boolean {
+        val durable = after.phase != before.phase ||
+            after.trackingStatus != before.trackingStatus ||
+            after.timeTariffMillis != before.timeTariffMillis ||
+            after.distanceMeters != before.distanceMeters ||
+            after.lastBillablePoint != before.lastBillablePoint
+        if (durable) return true
+        val since = lastPersistedElapsedMillis ?: return true
+        return clock.elapsedRealtimeMillis() - since >= HOLD_PERSIST_INTERVAL_MILLIS
     }
 
     private fun activate(ride: ActiveRide) {
@@ -226,6 +251,7 @@ internal class RideTrackingController(
         ownedRideId.set(ride.id)
         mutableState.value = ride.toTrackingState()
         lastNotificationElapsedMillis = clock.elapsedRealtimeMillis()
+        lastPersistedElapsedMillis = clock.elapsedRealtimeMillis()
         host.updateForegroundNotification(ride)
         startLocationAndTicks()
     }
@@ -281,6 +307,7 @@ internal class RideTrackingController(
         activeRide = null
         ownedRideId.set(null)
         lastNotificationElapsedMillis = null
+        lastPersistedElapsedMillis = null
         if (!keepState) mutableState.value = RideTrackingState.Idle
         host.stopForegroundAndService()
     }
@@ -312,5 +339,8 @@ internal class RideTrackingController(
     private companion object {
         const val TICK_INTERVAL_MILLIS = 1_000L
         const val NOTIFICATION_INTERVAL_MILLIS = 1_000L
+
+        /** How much of an unresolved hold an unexpected process death may cost. */
+        const val HOLD_PERSIST_INTERVAL_MILLIS = 5_000L
     }
 }

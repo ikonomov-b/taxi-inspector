@@ -13,13 +13,29 @@ import java.io.File
  * still app-scoped: no permission is needed for it, nothing else can write it, and uninstalling
  * the app deletes every trace with it.
  */
-class RideTraceStore internal constructor(private val root: File) {
+class RideTraceStore internal constructor(private val baseDirectory: File) {
     constructor(context: Context) : this(
-        File(context.getExternalFilesDir(null) ?: context.filesDir, DIRECTORY),
+        // getExternalFilesDir creates this directory, owned by the app. That matters: a
+        // directory created instead by `adb shell` belongs to shell, and the app then cannot
+        // even stat what is inside it, so the switch below would be invisible to the very
+        // process that reads it. Measured on an API 35 emulator, not theorised.
+        context.getExternalFilesDir(null) ?: context.filesDir,
     )
+
+    private val root: File get() = File(baseDirectory, DIRECTORY)
+
+    /**
+     * The switch lives beside the trace directory, not inside it, so that it sits in a directory
+     * the app created and can therefore read a shell-written file from, and so that pruning
+     * traces can never remove it.
+     */
+    private val switchFile: File get() = File(baseDirectory, SWITCH_FILE)
 
     /** The directory to pull traces from, so a script and a log line can name the same path. */
     val rootDirectory: File get() = root
+
+    /** Where the switch is expected, so the log line that reports it off can say where to look. */
+    val switchPath: File get() = switchFile
 
     /**
      * Whether a ride started now will be traced.
@@ -32,15 +48,14 @@ class RideTraceStore internal constructor(private val root: File) {
      *
      * `scripts/trace-toggle.sh on|off|status` manages it.
      */
-    fun isTracingEnabled(): Boolean = File(root, SWITCH_FILE).isFile
+    fun isTracingEnabled(): Boolean = switchFile.isFile
 
     fun setTracingEnabled(enabled: Boolean) {
-        val switch = File(root, SWITCH_FILE)
         if (enabled) {
-            root.mkdirs()
-            if (!switch.isFile) switch.writeText(SWITCH_CONTENT)
+            baseDirectory.mkdirs()
+            if (!switchFile.isFile) switchFile.writeText(SWITCH_CONTENT)
         } else {
-            switch.delete()
+            switchFile.delete()
         }
     }
 

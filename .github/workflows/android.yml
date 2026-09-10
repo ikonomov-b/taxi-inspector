@@ -16,6 +16,9 @@ jobs:
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
+        with:
+          # The app version is the commit count, so the default shallow clone would report 1.
+          fetch-depth: 0
 
       - name: Set up JDK 17
         uses: actions/setup-java@v4

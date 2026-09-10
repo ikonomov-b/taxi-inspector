@@ -8,6 +8,7 @@ import android.location.LocationListener
 import android.location.LocationManager
 import android.os.Build
 import android.os.Handler
+import android.os.HandlerThread
 import android.os.Looper
 import android.os.SystemClock
 import android.util.Log
@@ -33,9 +34,16 @@ class AndroidGpsLocationClient internal constructor(
     override fun isGpsProviderEnabled(): Boolean = source.isGpsProviderEnabled()
 
     override fun locationSamples(): Flow<LocationSample> = callbackFlow {
+        // Both callbacks are delivered on this thread rather than the main looper. The received
+        // timestamp a fix is stamped with decides whether it is fresh enough to bill, so UI work
+        // must not be able to delay it: a frame that takes 200 ms would push a fix 200 ms nearer
+        // the staleness bound for reasons that have nothing to do with reception.
+        val callbackThread = HandlerThread(CALLBACK_THREAD_NAME).apply { start() }
+        val callbackLooper = callbackThread.looper
+
         // Satellite status arrives on its own callback rather than attached to a fix, so the
         // latest observation is carried forward and applied to fixes received soon after it.
-        // Both callbacks are delivered on the main looper, so these need no synchronisation.
+        // Both callbacks share the one thread, so these need no synchronisation.
         var observedBand = LocationSample.Band.Unknown
         var observedElapsedMillis: Long? = null
         var observedL5Count: Int? = null
@@ -78,20 +86,23 @@ class AndroidGpsLocationClient internal constructor(
             minTimeMillis = UPDATE_INTERVAL_MILLIS,
             minDistanceMeters = 0f,
             listener = listener,
+            looper = callbackLooper,
         )
         // Requested second, and tolerantly: knowing the band only refines the movement
         // floor, so a receiver that refuses this subscription must still bill a ride. The
         // cost of trailing the location request is that the first fix or two read Unknown,
         // which is the conservative floor anyway.
-        runCatching { source.registerGnssStatus(statusListener) }
+        runCatching { source.registerGnssStatus(statusListener, callbackLooper) }
         awaitClose {
-            // Independently, so that a failure to release one still releases the other.
+            // Independently, so that a failure to release one still releases the other, and the
+            // thread is quit last so a callback already in flight still has a looper to run on.
             try {
                 source.removeUpdates(listener)
             } catch (_: SecurityException) {
                 // Permission may have been revoked immediately before cancellation.
             }
             runCatching { source.removeGnssStatus(statusListener) }
+            callbackThread.quitSafely()
         }
     }
 
@@ -100,6 +111,8 @@ class AndroidGpsLocationClient internal constructor(
 
         /** Mirrors RideEngine's own five-second freshness rule for location data. */
         const val BAND_FRESHNESS_MILLIS = 5_000L
+
+        const val CALLBACK_THREAD_NAME = "TaxiGnss"
 
         /**
          * Field diagnostics for real-device GNSS runs. Silent unless switched on for a
@@ -148,11 +161,12 @@ internal interface GpsLocationSource {
         minTimeMillis: Long,
         minDistanceMeters: Float,
         listener: LocationListener,
+        looper: Looper,
     )
 
     fun removeUpdates(listener: LocationListener)
 
-    fun registerGnssStatus(listener: GnssStatusListener)
+    fun registerGnssStatus(listener: GnssStatusListener, looper: Looper)
 
     fun removeGnssStatus(listener: GnssStatusListener)
 }
@@ -170,13 +184,14 @@ private class LocationManagerGpsLocationSource(
         minTimeMillis: Long,
         minDistanceMeters: Float,
         listener: LocationListener,
+        looper: Looper,
     ) {
         locationManager.requestLocationUpdates(
             LocationManager.GPS_PROVIDER,
             minTimeMillis,
             minDistanceMeters,
             listener,
-            Looper.getMainLooper(),
+            looper,
         )
     }
 
@@ -186,7 +201,7 @@ private class LocationManagerGpsLocationSource(
     }
 
     @SuppressLint("MissingPermission")
-    override fun registerGnssStatus(listener: GnssStatusListener) {
+    override fun registerGnssStatus(listener: GnssStatusListener, looper: Looper) {
         val callback = object : GnssStatus.Callback() {
             override fun onSatelliteStatusChanged(status: GnssStatus) {
                 listener.onSatelliteStatus(
@@ -196,7 +211,7 @@ private class LocationManagerGpsLocationSource(
             }
         }
         gnssCallbacks[listener] = callback
-        locationManager.registerGnssStatusCallback(callback, Handler(Looper.getMainLooper()))
+        locationManager.registerGnssStatusCallback(callback, Handler(looper))
     }
 
     override fun removeGnssStatus(listener: GnssStatusListener) {

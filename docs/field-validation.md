@@ -21,15 +21,21 @@ A trace holds coordinates, so nothing collects them by default.
 - A **release** build has the facility compiled out (`RIDE_TRACE_ENABLED = false`). It cannot be
   switched on, and it stores no route at all. That is the documented privacy contract.
 - A **debug** build can trace, but does not until the switch is raised. The switch is a marker
-  file, `traces/.tracing-enabled` in the app's own external files directory, so it can be flipped
-  over adb without opening the app and it survives a reboot — a field trip that goes unrecorded
+  file, `.tracing-enabled` in the app's own external files directory, so it can be flipped over
+  adb without opening the app and it survives a reboot — a field trip that goes unrecorded
   because a toggle reset itself is the one failure this facility cannot afford.
 
 ```sh
 scripts/build-device-apk.sh          # installs the debug build
+# Open the app once first: it has to create its own storage before the switch can go into it.
+# The script refuses rather than creating that directory itself, because a directory created
+# over adb belongs to shell and the app cannot then read the switch inside it.
 scripts/trace-toggle.sh on           # raise the flag
 scripts/trace-toggle.sh status       # confirm, and count what is stored
 ```
+
+If a ride records nothing, `adb logcat -s TaxiTrace` says why — tracing off, a directory it could
+not create, or a failed write. It never logs a coordinate.
 
 Each ride then writes `traces/<rideId>/`:
 
