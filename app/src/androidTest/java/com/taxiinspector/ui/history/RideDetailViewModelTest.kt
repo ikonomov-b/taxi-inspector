@@ -7,8 +7,10 @@ import androidx.test.ext.junit.runners.AndroidJUnit4
 import com.taxiinspector.core.decimal.DecimalAmount
 import com.taxiinspector.data.rides.RoomRideRepository
 import com.taxiinspector.data.rides.TaxiInspectorDatabase
+import com.taxiinspector.data.trace.RideTraceStore
 import com.taxiinspector.ride.RideEngine
 import com.taxiinspector.ride.Tariff
+import java.io.File
 import java.math.BigDecimal
 import java.util.Locale
 import java.util.TimeZone
@@ -20,13 +22,19 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Before
+import org.junit.Rule
+import org.junit.rules.TemporaryFolder
 import org.junit.Test
 import org.junit.runner.RunWith
 
 /** Verifies detail fidelity and confirmed individual deletion against real Room. */
 @RunWith(AndroidJUnit4::class)
 class RideDetailViewModelTest {
+    @get:Rule
+    val temporaryFolder = TemporaryFolder()
+
     private lateinit var database: TaxiInspectorDatabase
     private lateinit var repository: RoomRideRepository
 
@@ -37,6 +45,44 @@ class RideDetailViewModelTest {
             .allowMainThreadQueries()
             .build()
         repository = RoomRideRepository(database.rideDao())
+    }
+
+    @Test
+    fun aRideWithATraceOffersToShareItAndARideWithoutOneDoesNot() = runBlocking {
+        val store = RideTraceStore(temporaryFolder.root)
+        saveCompleted("traced", endedAtUtcMillis = 1_000)
+        val viewModel = RideDetailViewModel("traced", repository, traceStore = store)
+
+        // No trace: a build that never recorded one, or a ride from before it was switched on.
+        assertFalse(awaitState(viewModel) { it.ride != null }.hasTrace)
+
+        store.directoryFor("traced").mkdirs()
+        File(store.directoryFor("traced"), RideTraceStore.TRACK_FILE).writeText("<gpx></gpx>")
+        val withTrace = RideDetailViewModel("traced", repository, traceStore = store)
+
+        assertTrue(awaitState(withTrace) { it.ride != null }.hasTrace)
+
+        withTrace.onAction(RideDetailAction.ShareTrack)
+        val effect = withTimeout(3_000) { withTrace.effect.first() }
+        effect as RideDetailEffect.ShareFiles
+        assertEquals(1, effect.files.size)
+        assertEquals(RideTraceStore.TRACK_FILE, effect.files.single().name)
+        assertEquals("application/gpx+xml", effect.mimeType)
+    }
+
+    @Test
+    fun deletingARideDeletesItsRoute() = runBlocking {
+        val store = RideTraceStore(temporaryFolder.root)
+        saveCompleted("traced", endedAtUtcMillis = 1_000)
+        store.directoryFor("traced").mkdirs()
+        File(store.directoryFor("traced"), RideTraceStore.TRACK_FILE).writeText("<gpx></gpx>")
+        val viewModel = RideDetailViewModel("traced", repository, traceStore = store)
+        awaitState(viewModel) { it.ride != null }
+
+        viewModel.onAction(RideDetailAction.DeleteConfirmed)
+        withTimeout(3_000) { viewModel.deleted.first() }
+
+        assertFalse(store.hasTrace("traced"))
     }
 
     @After

@@ -112,6 +112,35 @@ private fun RideDetails(
     DetailRow(stringResource(R.string.ride_detail_per_km), ride.perKmRate)
     DetailRow(stringResource(R.string.ride_detail_per_minute), ride.perMinuteStillRate)
 
+    if (state.hasTrace) {
+        HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp))
+        Text(
+            text = stringResource(R.string.ride_detail_trace),
+            style = MaterialTheme.typography.titleMedium,
+        )
+        Text(
+            text = stringResource(R.string.ride_detail_trace_explanation),
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        OutlinedButton(
+            onClick = { onAction(RideDetailAction.ShareTrack) },
+            modifier = Modifier
+                .fillMaxWidth()
+                .heightIn(min = 48.dp),
+        ) {
+            Text(stringResource(R.string.action_share_track))
+        }
+        OutlinedButton(
+            onClick = { onAction(RideDetailAction.ShareFullTrace) },
+            modifier = Modifier
+                .fillMaxWidth()
+                .heightIn(min = 48.dp),
+        ) {
+            Text(stringResource(R.string.action_share_full_trace))
+        }
+    }
+
     if (state.deleteFailed) {
         Text(
             text = stringResource(R.string.delete_ride_failed),

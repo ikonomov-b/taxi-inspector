@@ -84,6 +84,13 @@ app/
     │   │   │   ├── time/Clock.kt
     │   │   │   ├── time/AndroidClock.kt
     │   │   │   └── result/AppError.kt
+    │   │   ├── trace/
+    │   │   │   ├── RideTraceRecorder.kt
+    │   │   │   ├── TraceRow.kt
+    │   │   │   ├── TraceCsv.kt
+    │   │   │   ├── TraceGpx.kt
+    │   │   │   ├── TraceMeta.kt
+    │   │   │   └── TraceTime.kt
     │   │   ├── ride/
     │   │   │   ├── Tariff.kt
     │   │   │   ├── ActiveRide.kt
@@ -92,7 +99,9 @@ app/
     │   │   │   ├── TrackingStatus.kt
     │   │   │   ├── LocationSample.kt
     │   │   │   ├── FareCalculator.kt
+    │   │   │   ├── Geodesic.kt
     │   │   │   ├── RideEngine.kt
+    │   │   │   ├── RideDecision.kt
     │   │   │   └── RideInput.kt
     │   │   ├── data/
     │   │   │   ├── rides/
@@ -103,10 +112,13 @@ app/
     │   │   │   │   ├── RideDao.kt
     │   │   │   │   ├── RoomRideRepository.kt
     │   │   │   │   └── RideMappers.kt
-    │   │   │   └── location/
-    │   │   │       ├── LocationClient.kt
-    │   │   │       ├── AndroidGpsLocationClient.kt
-    │   │   │       └── GnssBandClassifier.kt
+    │   │   │   ├── location/
+    │   │   │   │   ├── LocationClient.kt
+    │   │   │   │   ├── AndroidGpsLocationClient.kt
+    │   │   │   │   └── GnssBandClassifier.kt
+    │   │   │   └── trace/
+    │   │   │       ├── RideTraceStore.kt
+    │   │   │       └── FileRideTraceRecorder.kt
     │   │   ├── tracking/
     │   │   │   ├── RideTrackingService.kt
     │   │   │   ├── RideTrackingController.kt
@@ -292,6 +304,8 @@ ui ───────────────► ride ◄──────�
 - `AppContainer` is the composition root and builds concrete objects and ViewModel factories.
 
 Avoid generic `BaseViewModel`, repository base classes, event buses, global mutable ride state, and use-case wrapper classes. This structure is intentionally the smallest one that keeps fare logic testable and the background ride reliable.
+
+`trace` is pure Kotlin beside `ride`: it formats what the engine decided and never decides anything itself, so it can be JVM-tested and cannot influence a fare. `data/trace` is its only Android adapter, and the tracking controller is the only caller — the UI can share a finished trace but never records one. A trace is the single place the app writes coordinates to disk, which is why it exists only in debug builds and only once switched on; see `field-validation.md`.
 
 ## Error and privacy rules
 

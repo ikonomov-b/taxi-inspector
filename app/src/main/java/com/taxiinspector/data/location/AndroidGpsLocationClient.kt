@@ -38,10 +38,14 @@ class AndroidGpsLocationClient internal constructor(
         // Both callbacks are delivered on the main looper, so these need no synchronisation.
         var observedBand = LocationSample.Band.Unknown
         var observedElapsedMillis: Long? = null
+        var observedL5Count: Int? = null
+        var observedUsedInFix: Int? = null
 
         val statusListener = GnssStatusListener { satellitesInView, carrierFrequenciesHz ->
             observedBand = GnssBandClassifier.classify(carrierFrequenciesHz)
             observedElapsedMillis = receivedElapsedRealtimeMillis()
+            observedL5Count = GnssBandClassifier.l5SignalCount(carrierFrequenciesHz)
+            observedUsedInFix = carrierFrequenciesHz.size
             if (Log.isLoggable(FIELD_TAG, Log.DEBUG)) {
                 Log.d(
                     FIELD_TAG,
@@ -56,11 +60,15 @@ class AndroidGpsLocationClient internal constructor(
         val listener = object : LocationListener {
             override fun onLocationChanged(location: Location) {
                 val receivedElapsedMillis = receivedElapsedRealtimeMillis()
-                val band = observedElapsedMillis
-                    ?.takeIf { receivedElapsedMillis - it in 0..BAND_FRESHNESS_MILLIS }
-                    ?.let { observedBand }
-                    ?: LocationSample.Band.Unknown
-                val sample = location.toDomainSample(receivedElapsedMillis, band)
+                val fresh = observedElapsedMillis
+                    ?.let { receivedElapsedMillis - it in 0..BAND_FRESHNESS_MILLIS } == true
+                val band = if (fresh) observedBand else LocationSample.Band.Unknown
+                val sample = location.toDomainSample(
+                    receivedElapsedMillis = receivedElapsedMillis,
+                    band = band,
+                    l5SignalCount = if (fresh) observedL5Count else null,
+                    satellitesUsedInFix = if (fresh) observedUsedInFix else null,
+                )
                 if (sample == null) logDroppedFix(location) else logFieldQuality(sample)
                 sample?.let { trySend(it) }
             }
@@ -121,6 +129,7 @@ class AndroidGpsLocationClient internal constructor(
                 "fix band=${sample.band} accuracy=${sample.accuracyMeters}m " +
                     "speed=${sample.speedMetersPerSecond} " +
                     "speedAccuracy=${sample.speedAccuracyMetersPerSecond} " +
+                    "l5=${sample.l5SignalCount} usedInFix=${sample.satellitesUsedInFix} " +
                     "mock=${sample.isMock}",
             )
         }
@@ -214,6 +223,8 @@ private fun GnssStatus.carrierFrequenciesUsedInFix(): List<Float> {
 private fun Location.toDomainSample(
     receivedElapsedMillis: Long,
     band: LocationSample.Band,
+    l5SignalCount: Int? = null,
+    satellitesUsedInFix: Int? = null,
 ): LocationSample? {
     if (!hasAccuracy()) return null
 
@@ -241,6 +252,14 @@ private fun Location.toDomainSample(
         band = band,
         speedAccuracyMetersPerSecond = readSpeedAccuracy(),
         isMock = readIsMock(),
+        // Engine-neutral, and carried only so a debug trace can be lined up against an
+        // independent recording of the same trip: a GPX needs wall-clock time, and a fix
+        // without it cannot be aligned with anything.
+        utcMillis = time.takeIf { it > 0 },
+        bearingDegrees = if (hasBearing()) bearing.toDouble().takeIf { it.isFinite() && it in 0.0..360.0 } else null,
+        altitudeMeters = if (hasAltitude()) altitude.takeIf { it.isFinite() } else null,
+        satellitesUsedInFix = satellitesUsedInFix,
+        l5SignalCount = l5SignalCount,
     )
 }
 

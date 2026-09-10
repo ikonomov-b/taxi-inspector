@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Only the debug ride traces are shareable, and only from the app's own external files
+  directory. Nothing else the app stores is exposed, and a release build writes no traces at all.
+-->
+<paths>
+    <external-files-path name="traces" path="traces/" />
+    <files-path name="internal-traces" path="traces/" />
+</paths>

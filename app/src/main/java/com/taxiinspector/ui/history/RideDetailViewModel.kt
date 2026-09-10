@@ -6,6 +6,7 @@ import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
 import com.taxiinspector.data.rides.RoomRideRepository
+import com.taxiinspector.data.trace.RideTraceStore
 import com.taxiinspector.ride.SavedRideSummary
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.Flow
@@ -24,12 +25,15 @@ class RideDetailViewModel internal constructor(
     private val rideId: String,
     private val repository: RoomRideRepository,
     private val formatter: RideHistoryFormatter = RideHistoryFormatter(),
+    private val traceStore: RideTraceStore? = null,
 ) : ViewModel() {
     private val localState = MutableStateFlow(LocalState())
     private val deletedEvents = Channel<Unit>(Channel.BUFFERED)
+    private val effects = Channel<RideDetailEffect>(Channel.BUFFERED)
 
     /** Emitted only after Room has durably deleted the selected summary. */
     val deleted: Flow<Unit> = deletedEvents.receiveAsFlow()
+    val effect: Flow<RideDetailEffect> = effects.receiveAsFlow()
 
     private var savedRide: SavedRideSummary? = null
     private val savedRideFlow = repository.observeSummary(rideId).onEach { savedRide = it }
@@ -44,6 +48,7 @@ class RideDetailViewModel internal constructor(
             isDeleteConfirmationVisible = local.isDeleteConfirmationVisible && savedRide != null,
             isDeleting = local.isDeleting,
             deleteFailed = local.deleteFailed,
+            hasTrace = savedRide != null && traceStore?.hasTrace(rideId) == true,
         )
     }.stateIn(viewModelScope, SharingStarted.Eagerly, RideDetailUiState())
 
@@ -61,7 +66,24 @@ class RideDetailViewModel internal constructor(
                 it.copy(isDeleteConfirmationVisible = false)
             }
             RideDetailAction.DeleteConfirmed -> deleteRide()
+            RideDetailAction.ShareTrack -> share(justTheTrack = true)
+            RideDetailAction.ShareFullTrace -> share(justTheTrack = false)
         }
+    }
+
+    private fun share(justTheTrack: Boolean) {
+        val store = traceStore ?: return
+        val files = store.filesFor(rideId)
+        val chosen = if (justTheTrack) {
+            files.filter { it.name.endsWith(".gpx") }
+        } else {
+            files
+        }
+        if (chosen.isEmpty()) return
+        // A single GPX is offered as one, so Locus Map recognises it and offers to import the
+        // track; a mixed set has no honest shared type.
+        val mimeType = if (chosen.size == 1 && justTheTrack) GPX_MIME_TYPE else ANY_MIME_TYPE
+        effects.trySend(RideDetailEffect.ShareFiles(chosen, mimeType))
     }
 
     private fun deleteRide() {
@@ -69,7 +91,11 @@ class RideDetailViewModel internal constructor(
         localState.value = LocalState(isDeleting = true)
         viewModelScope.launch {
             runCatching { repository.deleteSummary(rideId) }
-                .onSuccess { deletedEvents.send(Unit) }
+                .onSuccess {
+                    // Deleting the record deletes its route with it.
+                    runCatching { traceStore?.delete(rideId) }
+                    deletedEvents.send(Unit)
+                }
                 .onFailure { localState.value = LocalState(deleteFailed = true) }
         }
     }
@@ -78,9 +104,13 @@ class RideDetailViewModel internal constructor(
         fun factory(
             rideId: String,
             repository: RoomRideRepository,
+            traceStore: RideTraceStore? = null,
         ): ViewModelProvider.Factory = viewModelFactory {
-            initializer { RideDetailViewModel(rideId, repository) }
+            initializer { RideDetailViewModel(rideId, repository, traceStore = traceStore) }
         }
+
+        private const val GPX_MIME_TYPE = "application/gpx+xml"
+        private const val ANY_MIME_TYPE = "*/*"
     }
 
     private data class LocalState(

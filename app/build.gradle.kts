@@ -21,6 +21,19 @@ android {
 
     buildFeatures {
         compose = true
+        buildConfig = true
+    }
+
+    buildTypes {
+        getByName("debug") {
+            // Every trip on a debug build writes a ride trace, coordinates included, so the
+            // app's own billing decisions can be compared with an independent recording.
+            buildConfigField("boolean", "RIDE_TRACE_ENABLED", "true")
+        }
+        getByName("release") {
+            // Compiled out, so the release privacy contract holds: no route is ever stored.
+            buildConfigField("boolean", "RIDE_TRACE_ENABLED", "false")
+        }
     }
 
     compileOptions {
@@ -76,4 +89,10 @@ dependencies {
 
 ksp {
     arg("room.schemaLocation", "$projectDir/schemas")
+}
+
+tasks.withType<Test>().configureEach {
+    // scripts/replay-trace.sh passes a captured decisions.csv here; TraceReplayTest is
+    // skipped when the property is absent.
+    System.getProperty("taxi.trace")?.let { systemProperty("taxi.trace", it) }
 }

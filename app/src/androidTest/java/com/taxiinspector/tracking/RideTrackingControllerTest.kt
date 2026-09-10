@@ -11,12 +11,15 @@ import com.taxiinspector.data.rides.RoomRideRepository
 import com.taxiinspector.data.rides.TaxiInspectorDatabase
 import com.taxiinspector.ride.ActiveRide
 import com.taxiinspector.ride.LocationSample
+import com.taxiinspector.ride.RideDecision
 import com.taxiinspector.ride.RideEngine
 import com.taxiinspector.ride.RideInput
 import com.taxiinspector.ride.RidePhase
 import com.taxiinspector.ride.RideSummary
 import com.taxiinspector.ride.Tariff
 import com.taxiinspector.ride.TrackingStatus
+import com.taxiinspector.trace.NoOpRideTraceRecorder
+import com.taxiinspector.trace.RideTraceRecorder
 import java.math.BigDecimal
 import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.atomic.AtomicInteger
@@ -259,19 +262,92 @@ class RideTrackingControllerTest {
         assertEquals(interrupted, repeated)
     }
 
+    @Test
+    fun aRideFeedsEveryFixAndItsVerdictToTheTrace() = runBlocking {
+        useCompany(tariff())
+        val trace = RecordingTrace()
+        val locationClient = FakeLocationClient()
+        val candidate = createController(locationClient = locationClient, trace = trace)
+
+        candidate.dispatch(RideCommand.Start)
+        candidate.awaitActive()
+        locationClient.awaitSubscription()
+        locationClient.emit(gpsSample(1_000))
+        locationClient.emit(gpsSample(2_000).copy(accuracyMeters = 40.0))
+        awaitCondition {
+            trace.recorded.containsAll(
+                listOf(
+                    RideDecision.Reason.Seeded.name,
+                    RideDecision.Reason.RejectedAccuracy.name,
+                ),
+            )
+        }
+
+        // The refused fix is recorded too: a dropped fix and a fix that never arrived look
+        // identical in a trace that only holds the accepted ones.
+        assertEquals(listOf("ride-under-test"), trace.opened.toList())
+        assertEquals("Start", trace.commands.first())
+
+        candidate.dispatch(RideCommand.Discard)
+        awaitCondition { trace.deleted.isNotEmpty() }
+        // A ride the user threw away leaves no route behind.
+        assertEquals(listOf("ride-under-test"), trace.deleted.toList())
+    }
+
     private fun createController(
         locationClient: FakeLocationClient = FakeLocationClient(),
         prerequisites: FakePrerequisites = FakePrerequisites(),
         host: FakeTrackingHost = FakeTrackingHost(),
         clock: FakeClock = FakeClock(),
+        trace: RideTraceRecorder = NoOpRideTraceRecorder,
     ): RideTrackingController = RideTrackingController(
         repository = repository,
         locationClient = locationClient,
         prerequisites = prerequisites,
         clock = clock,
         host = host,
+        trace = trace,
         rideIdFactory = { "ride-under-test" },
     ).also { controller = it }
+
+    /**
+     * Records the calls a real recorder would turn into files. Concurrent lists because the
+     * controller writes them on its own event loop and the test reads them from another thread.
+     */
+    private class RecordingTrace : RideTraceRecorder {
+        val opened = CopyOnWriteArrayList<String>()
+        val recorded = CopyOnWriteArrayList<String>()
+        val commands = CopyOnWriteArrayList<String>()
+        val closed = CopyOnWriteArrayList<String>()
+        val deleted = CopyOnWriteArrayList<String>()
+
+        override fun open(ride: ActiveRide, startedUtcMillis: Long, continuing: Boolean) {
+            opened += if (continuing) "${ride.id}:continuing" else ride.id
+        }
+
+        override fun record(
+            input: RideInput,
+            before: ActiveRide,
+            after: ActiveRide,
+            decision: RideDecision?,
+        ) {
+            // Ticks reduce to no decision at all; only what the engine actually decided about
+            // an input is worth a row.
+            decision?.let { recorded += it.reason.name }
+        }
+
+        override fun command(label: String, ride: ActiveRide?) {
+            commands += label
+        }
+
+        override fun close(ride: ActiveRide) {
+            closed += ride.id
+        }
+
+        override fun delete(rideId: String) {
+            deleted += rideId
+        }
+    }
 
     private suspend fun RideTrackingController.awaitActive(): RideTrackingState.Active =
         awaitState { it is RideTrackingState.Active } as RideTrackingState.Active

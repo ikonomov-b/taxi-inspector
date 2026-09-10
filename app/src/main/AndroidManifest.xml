@@ -22,6 +22,21 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+        <!--
+          Hands a debug ride trace to another app (Locus Map, a file manager, a mail client)
+          without making it world-readable. Not exported, and a release build writes no traces
+          for it to serve.
+        -->
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="${applicationId}.traces"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/trace_paths" />
+        </provider>
+
         <service
             android:name=".tracking.RideTrackingService"
             android:exported="false"

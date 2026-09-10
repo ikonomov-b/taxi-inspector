@@ -65,3 +65,28 @@ ensure_emulator_running() {
 
   echo "$serial"
 }
+
+# Resolves which device a trace command should act on. Honours ANDROID_SERIAL, otherwise picks
+# the only attached device, otherwise refuses rather than guessing: a phone plugged in for field
+# testing and an emulator running tests are both "a device", and flipping the wrong one silently
+# is how a field trip goes unrecorded.
+resolve_target_serial() {
+  require_sdk_tools
+  if [[ -n "${ANDROID_SERIAL:-}" ]]; then
+    echo "$ANDROID_SERIAL"
+    return
+  fi
+  local serials
+  mapfile -t serials < <("$ADB" devices | awk '$2 == "device" {print $1}')
+  if [[ ${#serials[@]} -eq 1 ]]; then
+    echo "${serials[0]}"
+    return
+  fi
+  if [[ ${#serials[@]} -eq 0 ]]; then
+    echo "No device is attached." >&2
+    exit 1
+  fi
+  echo "More than one device is attached; set ANDROID_SERIAL to choose:" >&2
+  printf '  %s\n' "${serials[@]}" >&2
+  exit 1
+}

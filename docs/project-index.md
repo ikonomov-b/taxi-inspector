@@ -22,6 +22,8 @@ The safety priority is explainability: uncertain GPS data freezes billing rather
 | `taxi-inspector-design.md` | Product/UI/rule changes | User flow, tariff semantics, fare/GPS rules, privacy, and acceptance criteria. |
 | `code-structure.md` | Architecture/data/service changes | Dependencies, packages, persistence, service lifecycle, and test strategy. |
 | `development-environment.md` | Build/tooling work | Verified Android Studio/JBR/SDK paths and local setup. |
+| `gps-fidelity-inspection-and-plan.md` | GPS, distance, or fare-attribution work | The mode-S engine contract as built, its measured residuals, and the remaining robustness plan. Authoritative for engine behaviour until the design document is rewritten. |
+| `field-validation.md` | Recording or analysing a real trip | How to switch tracing on, what the files hold, how to pull them, and the Locus Map comparison procedure. |
 
 `build-status.md` is the only live implementation-status document. This index intentionally does not duplicate phase completion, verification results, or current risks.
 
@@ -36,13 +38,14 @@ The safety priority is explainability: uncertain GPS data freezes billing rather
 | Pure fare/session domain | `app/src/main/java/com/taxiinspector/ride/` | Tariff, `TaxiCompany` labels and their name-key rule, fare calculation, state models, GPS inputs, and `RideEngine`. Must stay Android-free. |
 | Local persistence | `app/src/main/java/com/taxiinspector/data/rides/` | Room entities, mappings, DAO, database, forward migrations, repository, and app container. |
 | GPS location adapter | `app/src/main/java/com/taxiinspector/data/location/` | Android-free `LocationClient` boundary, the `LocationManager.GPS_PROVIDER` adapter, and the `GnssStatus` carrier-frequency band classifier. |
+| Debug ride trace | `app/src/main/java/com/taxiinspector/trace/` and `data/trace/` | Android-free GPX/CSV/metadata writers and the recorder boundary, plus the file recorder and the store that owns the trace directory and the opt-in switch. Debug builds only, off until switched on, compiled out of release. |
 | Foreground tracking | `app/src/main/java/com/taxiinspector/tracking/` | Non-sticky service, serialized ride owner, commands, notifications, prerequisite checks, ownership binding, and recovery coordination. |
 | Application UI | `app/src/main/java/com/taxiinspector/ui/` | `TaxiInspectorApp`, navigation, theme, shared display formatting, Meter, Taxi companies, Company editor, History, and Ride Detail. UI state is immutable; History and the company flow observe Room and every destructive action is confirmed, while Meter renders state and sends commands without owning a ride or reading location. `ui/tariff/` is the parked anonymous single-tariff variant: it builds and is tested, but nothing navigates to it. |
 | Unit tests | `app/src/test/java/com/taxiinspector/` | JVM tests for decimal parsing, fare calculation, and core ride state. |
 | Android integration tests | `app/src/androidTest/java/com/taxiinspector/` | API 35 Room, migration, GPS adapter, foreground service, notification action, recovery, and Compose/state-holder tests for Meter, the company flow, History, Ride Detail, and the parked tariff editor. |
 | Room schema | `app/schemas/` | Versioned exported schemas, currently versions 1 and 2. Keep them updated with intentional schema changes, and add a migration test for every new version. |
 | Android resources | `app/src/main/res/` | Vintage palette, launcher/notification resources, and every user-facing string. Visual refinement remains Phase 9 work. |
-| Local dev/emulator scripts | `scripts/` | Boot/install/launch, CI-mirroring check, instrumented-test runner, and a black-box simulated-drive test; see `development-environment.md`. |
+| Local dev/emulator scripts | `scripts/` | Boot/install/launch, CI-mirroring check, instrumented-test runner, a black-box simulated-drive test, and the ride-trace tooling: `trace-toggle.sh`, `pull-traces.sh` and `compare_tracks.py`. See `development-environment.md` and `field-validation.md`. |
 
 ## Current implementation status
 
@@ -59,6 +62,7 @@ Compose UI → ride domain ← tracking service
 ```
 
 - `ride` is pure Kotlin and owns all fare decisions.
+- `trace` is pure Kotlin and only formats what `ride` decided; it never decides anything.
 - `data` adapts Room and, later, Android location.
 - `tracking` serializes all running-session mutations.
 - `ui` renders state and sends actions; it never calculates fares or requests locations directly.

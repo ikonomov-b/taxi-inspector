@@ -130,6 +130,10 @@
     <string name="ride_detail_per_minute">Per minute car-still rate</string>
     <string name="ride_detail_distance_value">%1$s km</string>
     <string name="action_delete_ride">Delete saved ride</string>
+    <string name="ride_detail_trace">Debug ride trace</string>
+    <string name="ride_detail_trace_explanation">This build recorded the route and every billing decision for this ride. Share the track to overlay it on another recording of the same trip.</string>
+    <string name="action_share_track">Share GPX track</string>
+    <string name="action_share_full_trace">Share full trace</string>
     <string name="delete_ride_title">Delete saved ride?</string>
     <string name="delete_ride_body">This ride summary is deleted immediately. This cannot be undone.</string>
     <string name="delete_ride_confirm">Delete ride</string>

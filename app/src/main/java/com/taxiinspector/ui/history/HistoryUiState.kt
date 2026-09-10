@@ -28,6 +28,8 @@ data class RideDetailUiState(
     val isDeleteConfirmationVisible: Boolean = false,
     val isDeleting: Boolean = false,
     val deleteFailed: Boolean = false,
+    /** A debug build that traced this trip; false in release, where no trace is ever written. */
+    val hasTrace: Boolean = false,
 )
 
 data class RideDetailPresentation(
@@ -50,4 +52,15 @@ sealed interface RideDetailAction {
     data object DeleteRequested : RideDetailAction
     data object DeleteDismissed : RideDetailAction
     data object DeleteConfirmed : RideDetailAction
+
+    /** The GPX alone, which Locus Map offers to import directly. */
+    data object ShareTrack : RideDetailAction
+
+    /** Track, decision log and metadata together, for analysis off the phone. */
+    data object ShareFullTrace : RideDetailAction
+}
+
+/** One-off effects the route performs; the state holder cannot touch Android intents. */
+sealed interface RideDetailEffect {
+    data class ShareFiles(val files: List<java.io.File>, val mimeType: String) : RideDetailEffect
 }

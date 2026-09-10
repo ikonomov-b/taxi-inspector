@@ -104,6 +104,24 @@ object RideEngine {
     )
 
     /**
+     * The thresholds in force, for a trace to record beside the ride it explains. A captured
+     * ride replayed against a different set of constants is not the same measurement, and
+     * without these written down there is no way to tell afterwards which set produced it.
+     */
+    fun constantsForTrace(): Map<String, String> = mapOf(
+        "billingAccuracyMeters" to BILLING_ACCURACY_METERS.toString(),
+        "minimumSignificantMovementMeters" to MINIMUM_SIGNIFICANT_MOVEMENT_METERS.toString(),
+        "dualBandSignificantMovementMeters" to DUAL_BAND_SIGNIFICANT_MOVEMENT_METERS.toString(),
+        "deadbandRule" to "max(floor, baselineAccuracy + sampleAccuracy)",
+        "freshSampleMillis" to FRESH_SAMPLE_MILLIS.toString(),
+        "gpsLossMillis" to GPS_LOSS_MILLIS.toString(),
+        "maxPlausibleSpeed" to MAX_PLAUSIBLE_SPEED.toString(),
+        "speedMargin" to SPEED_MARGIN.toString(),
+        "outlierStreakLimit" to OUTLIER_STREAK_LIMIT.toString(),
+        "fareModel" to "modeS-perClosedInterval",
+    )
+
+    /**
      * Mode S over one closed interval: the tariff that earns more takes the whole interval.
      * An exact tie goes to distance, which is the direction a meter switches at its cross-over.
      */

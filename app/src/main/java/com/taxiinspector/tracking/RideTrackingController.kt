@@ -7,6 +7,8 @@ import com.taxiinspector.ride.ActiveRide
 import com.taxiinspector.ride.RideEngine
 import com.taxiinspector.ride.RideInput
 import com.taxiinspector.ride.RidePhase
+import com.taxiinspector.trace.NoOpRideTraceRecorder
+import com.taxiinspector.trace.RideTraceRecorder
 import java.util.UUID
 import java.util.concurrent.atomic.AtomicReference
 import kotlinx.coroutines.CancellationException
@@ -44,6 +46,7 @@ internal class RideTrackingController(
     private val prerequisites: TrackingPrerequisites,
     private val clock: Clock,
     private val host: TrackingHost,
+    private val trace: RideTraceRecorder = NoOpRideTraceRecorder,
     dispatcher: CoroutineDispatcher = Dispatchers.Default,
     private val rideIdFactory: () -> String = { UUID.randomUUID().toString() },
 ) : RideCommandSink {
@@ -93,12 +96,15 @@ internal class RideTrackingController(
 
     private suspend fun handle(event: Event) {
         when (event) {
-            is Event.Command -> when (event.command) {
-                RideCommand.Start -> start()
-                RideCommand.Pause -> pause()
-                RideCommand.Resume -> resume()
-                RideCommand.Stop -> stopAndSave()
-                RideCommand.Discard -> discard()
+            is Event.Command -> {
+                trace.command(event.command.name, activeRide)
+                when (event.command) {
+                    RideCommand.Start -> start()
+                    RideCommand.Pause -> pause()
+                    RideCommand.Resume -> resume()
+                    RideCommand.Stop -> stopAndSave()
+                    RideCommand.Discard -> discard()
+                }
             }
             is Event.Location -> updateRide(RideInput.LocationReceived(event.sample, event.sample.receivedElapsedMillis))
             is Event.Tick -> updateRide(RideInput.Tick(event.elapsedRealtimeMillis))
@@ -123,6 +129,7 @@ internal class RideTrackingController(
         }
 
         val ride = repository.startRide(rideIdFactory(), clock.elapsedRealtimeMillis())
+        trace.open(ride, clock.utcMillis())
         activate(ride)
     }
 
@@ -142,6 +149,8 @@ internal class RideTrackingController(
             persisted,
             RideInput.Resume(clock.elapsedRealtimeMillis()),
         )
+        // The same trip continues, so the trace it already has is appended to, not replaced.
+        trace.open(resumed, clock.utcMillis(), continuing = true)
         repository.updateActiveRide(resumed)
         activate(resumed)
     }
@@ -168,12 +177,15 @@ internal class RideTrackingController(
         } else {
             repository.finishCompleted(summary, clock.utcMillis())
         }
+        trace.close(current)
         finishOwnership()
     }
 
     private suspend fun discard() {
         val current = activeRide ?: repository.currentActiveRide() ?: return
         repository.discardActiveRide(current.id)
+        // A discarded ride leaves nothing behind, its route included.
+        trace.delete(current.id)
         finishOwnership()
     }
 
@@ -197,7 +209,10 @@ internal class RideTrackingController(
 
     private suspend fun updateRide(input: RideInput) {
         val current = activeRide ?: return
-        val updated = RideEngine.reduce(current, input)
+        val (updated, decision) = RideEngine.step(current, input)
+        // Recorded before the early return: a refused fix changes no state, and a trace that
+        // only held the accepted ones could not explain where a missing metre went.
+        trace.record(input, current, updated, decision)
         if (updated == current) return
 
         repository.updateActiveRide(updated)

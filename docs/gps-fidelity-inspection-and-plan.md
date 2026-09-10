@@ -1,6 +1,6 @@
 # Taxi Inspector — GPS Fidelity Inspection and Mode-S Implementation Plan
 
-> Status: **section 4 implemented; sections 5, 6 and 7 not started**. Written 2026-09-09 against commit `7761412`. The engine commit of section 8's sequence landed on 2026-09-10 and this document records the amendments it needed, each marked **Amended in implementation**. The fare and GPS contract in `taxi-inspector-design.md` is now behind the code and is rewritten in commit 4; until then this document is authoritative for engine behaviour.
+> Status: **sections 4 and 6 implemented; section 5 outstanding except the `LocationSample` fields; section 7 not started**. Written 2026-09-09 against commit `7761412`. The engine (commit 1) and the debug ride trace (commit 3) landed on 2026-09-10, each amendment they needed marked **Amended in implementation** below. Commit 2's remaining robustness work — the callback `HandlerThread`, the wakelock and the Room write cadence — and commit 4's document and script rewrite are still open, so `scripts/check_ride_result.py` still encodes the superseded speed hysteresis and `simulate-drive.sh` fails until it is amended. The fare and GPS contract in `taxi-inspector-design.md` is behind the code; until commit 4 this document is authoritative for engine behaviour, and `field-validation.md` for the trace.
 
 ## 1. Purpose
 
@@ -51,6 +51,8 @@ A throwaway JVM probe drove the current `RideEngine` at 1 Hz with the test tarif
 3. **Weak fixes are non-observations**, not billing boundaries. GPS Lost at 15 s remains the only boundary.
 4. **Outliers are rejected by implied speed** with an accuracy budget, and a relocation is confirmed by two mutually plausible fixes or a streak of three.
 5. **Debug ride trace on by default in debug builds**, compiled out of release, shareable from Ride Detail.
+
+   **Amended in implementation: off by default, opt-in.** A trace holds coordinates, so nothing collects them until asked to, debug build or not. The compile-time gate stays — a release build has the facility compiled out and cannot be switched on at all — and a debug build now needs a switch raised as well. The switch is a marker file, `traces/.tracing-enabled` in the app's own external files directory, rather than a stored setting: it can be flipped over adb without opening the app, it needs no Room migration, and it survives a reboot, because a field trip that goes unrecorded because a toggle reset itself is the one failure this facility cannot afford. `scripts/trace-toggle.sh on|off|status` manages it.
 6. **No Room schema change** in this work. Renamed domain fields keep their columns.
 
 ## 4. Engine specification (`app/src/main/java/com/taxiinspector/ride/`)
@@ -81,6 +83,8 @@ Companion changes:
   **Amended in implementation.** `reconcile` and the label rule do not compare those two values. Dividing at scale 18 leaves a sixtieth a hair large, so for the documented tie case — `perKm` 1.20, `perMin` 0.36, 5 m in 1 s — `timeFare` exceeds `distanceFare` by 1.2e-19 and the tie falls to Time, not Distance. Both now call `FareCalculator.compareDistanceToTimeFare(tariff, meters, millis)`, which cross-multiplies `perKm x metres x 60` against `perMin x millis`: the same inequality with no division and no rounding at all. `FareCalculatorTest` pins both halves of this.
 - New `Geodesic.kt`: Vincenty inverse on WGS84 (a = 6 378 137, f = 1/298.257223563, tolerance 1e-12, ≤ 200 iterations), haversine fallback (R = 6 371 008.8) on non-convergence, 0 for coincident points. Replaces the mean-radius haversine.
 - `LocationSample`: add `utcMillis: Long? = null`, `bearingDegrees: Double? = null`, `altitudeMeters: Double? = null`, `satellitesUsedInFix: Int? = null`, `l5SignalCount: Int? = null`. Engine-neutral; needed by the trace (Locus GPX carries UTC).
+
+  **Amended in implementation: mapped in commit 3, not commit 2.** A GPX without `<time>` cannot be aligned with a Locus recording at all, which is the whole point of the trace, so the adapter's mapping of these five fields was pulled forward out of section 5.1. The rest of 5.1, moving both callbacks onto a dedicated `HandlerThread`, is still outstanding.
 - `RideSummary.idleMillis → timeTariffMillis` (entity column unchanged); `finish()` writes `billedTimeMillis`.
 - New pure `RideEngine.interrupt(ride)` and `internal fun reconcile(tariff, meters, millis): Attribution`; `RideDao.markRunningRideInterrupted` calls `interrupt` instead of copying fields by hand.
 - Constants: keep 20 m billing accuracy, 5 m / 2.5 m floors, 5 000 ms freshness, 15 000 ms loss. Delete `WEAK_ACCURACY_METERS`, `MAXIMUM_SEGMENT_METERS`, `IDLE_ENTRY_*`, `MOVING_EXIT_*`, `RideInput.GpsTimedOut`. Add `MAX_PLAUSIBLE_SPEED = 55.0` m/s, `SPEED_MARGIN = 15.0` m/s, `OUTLIER_STREAK_LIMIT = 3`.
@@ -281,11 +285,15 @@ Use `RideEngine.step()` and hand `(input, before, after, decision)` to a `RideTr
 - `app/build.gradle.kts`: `buildFeatures { buildConfig = true }`; `buildConfigField("boolean", "RIDE_TRACE_ENABLED", "true")` in `debug`, `"false"` in `release`. `AppContainer` picks `FileRideTraceRecorder` or `NoOpRideTraceRecorder`. The developer installs debug builds via `scripts/build-device-apk.sh`, so every trip on the phone is traced; release keeps the documented privacy contract (no stored route, no coordinates in logs).
 - `AndroidManifest.xml`: `androidx.core.content.FileProvider` with authority `${applicationId}.traces`, `exported="false"`, `grantUriPermissions="true"`, and `res/xml/trace_paths.xml` exposing `files/traces/`.
 
+  **Amended in implementation.** Traces are written to the app's own *external* files directory (`getExternalFilesDir`), not `filesDir`, so a captured trip can be pulled with a plain `adb pull` instead of needing `run-as` on a debuggable build. It is still app-scoped: no permission, nothing else can write it, and uninstalling removes every trace. `trace_paths.xml` declares `external-files-path`, keeping the internal path as a fallback for a device with no external storage. `scripts/pull-traces.sh` collects them.
+
 ### 6.2 Pure formatting package `com.taxiinspector.trace` (JVM-testable, Android-free)
 
 - `TraceRow`: sample fields, decision fields, cumulative `distanceMeters`, `billedTimeMillis`, `trackingStatus`, `motionState`, formatted total.
 - `TraceCsv`: header plus one row per raw fix, per status- or label-changing tick, per command. Columns: `seq,type,utcMillis,fixElapsedMillis,receivedElapsedMillis,lat,lon,altM,accuracyM,speedMps,speedAccMps,bearingDeg,band,l5,usedInFix,mock,reason,chordM,significantM,excessSpeedMps,baselineAgeMs,deltaMs,billedAs,distanceM,timeMs,status,motion,total`.
 - `TraceGpx`: GPX 1.1, one `<trk>` with one `<trkseg>`, every raw fix as `<trkpt lat lon>` with `<ele>`, ISO-8601 UTC `<time>`, and `<extensions>` carrying accuracy, speed, band, reason, billedAs and the cumulative totals. Locus imports it as a track.
+
+  **Amended in implementation.** The extension elements are namespaced (`urn:taxi-inspector:gpx:1`, prefix `ti`). Unprefixed children of `<extensions>` are not valid GPX, and while Locus tolerates them a strict parser need not; namespacing means every reader ignores what it does not recognise instead of rejecting the file. `TraceFormatTest` parses the output with a namespace-aware `DocumentBuilder` to hold that. ISO-8601 is computed arithmetically rather than formatted: `java.time` needs API 26 or core library desugaring, this app targets 24 without it, and `SimpleDateFormat` is not safe to share between threads.
 - `TraceMeta` JSON: rideId, company name, tariff, cross-over speed, engine constants, app `versionName`, device model, Android release, start UTC.
 
 ### 6.3 `data/trace/FileRideTraceRecorder.kt` and `RideTraceStore`
@@ -302,14 +310,14 @@ Use `RideEngine.step()` and hand `(input, before, after, decision)` to a `RideTr
 ### 6.5 Offline replay and comparison tooling
 
 - `app/src/test/java/com/taxiinspector/trace/TraceReplayTest.kt`: reads a `decisions.csv` named by the system property `taxi.trace`, rebuilds `LocationSample`s and 1 Hz ticks, runs `RideEngine`, prints totals and a reason-code histogram; skipped when the property is absent. `build.gradle.kts` forwards `-Dtaxi.trace` to the test JVM. Any real trace can then be replayed against engine variants without a device.
-- `scripts/compare_tracks.py`: takes the app GPX/CSV and a Locus GPX, aligns by UTC time, reports Locus raw distance against app billed distance per minute, and attributes the shortfall by reason code (Weak, outlier, deadband residual, GPS Lost).
+- `scripts/compare_tracks.py`: takes the app GPX/CSV and a Locus GPX, aligns by UTC time, reports Locus raw distance against app billed distance per minute, and attributes the shortfall by reason code (Weak, outlier, deadband residual, GPS Lost). Implemented, standard library only, with its own Vincenty so it measures the reference path exactly as the engine does. It also runs with no reference file, which is what a stationary hold needs.
 
-### 6.6 Locus comparison procedure (to become `docs/field-validation.md`)
+### 6.6 Locus comparison procedure (now `docs/field-validation.md`)
 
 1. In Locus Map, record with GPS only (disable fused and network sources), a 1 s interval, a 0 m distance filter, and the accuracy filter off, so the recording is a raw track rather than a smoothed one.
 2. Start both recordings in the taxi; Stop & save in Taxi Inspector at the end; stop the Locus recording.
 3. Open the ride in History → Ride Detail → "Share GPX track" into Locus for a visual overlay, and "Share full trace" to a computer.
-4. Export the Locus GPX and run `scripts/compare_tracks.py app.gpx decisions.csv locus.gpx`.
+4. Export the Locus GPX and run `scripts/compare_tracks.py decisions.csv locus.gpx`.
 5. Compare distance over Moving intervals only; Locus over-reads while stationary because it sums raw jitter. The reason-code histogram attributes every metre of difference. The taximeter, not Locus, remains the reference for the mode-S switch and for the fare increment; record its mode and increment on the same drive.
 
 ## 7. Scripts and documents to amend with the code change

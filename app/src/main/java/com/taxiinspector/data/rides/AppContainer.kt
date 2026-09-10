@@ -2,10 +2,16 @@ package com.taxiinspector.data.rides
 
 import android.content.Context
 import androidx.room.Room
+import com.taxiinspector.BuildConfig
 import com.taxiinspector.core.time.AndroidClock
 import com.taxiinspector.core.time.Clock
 import com.taxiinspector.data.location.AndroidGpsLocationClient
 import com.taxiinspector.data.location.LocationClient
+import com.taxiinspector.data.trace.FileRideTraceRecorder
+import com.taxiinspector.data.trace.RideTraceStore
+import com.taxiinspector.trace.NoOpRideTraceRecorder
+import com.taxiinspector.trace.RideTraceRecorder
+import com.taxiinspector.trace.TraceEnvironment
 
 /** Explicit composition root; this small app does not need a dependency-injection framework. */
 class AppContainer(context: Context) {
@@ -18,4 +24,24 @@ class AppContainer(context: Context) {
     val rideRepository: RoomRideRepository = RoomRideRepository(database.rideDao())
     val locationClient: LocationClient = AndroidGpsLocationClient(context.applicationContext)
     val clock: Clock = AndroidClock
+
+    val traceStore: RideTraceStore = RideTraceStore(context.applicationContext)
+
+    /**
+     * Debug builds trace every trip, coordinates included, so a ride can be compared with an
+     * independent recording of it. Release builds get the no-op: the documented privacy
+     * contract is that a released app stores no route at all.
+     */
+    val traceRecorder: RideTraceRecorder = if (BuildConfig.RIDE_TRACE_ENABLED) {
+        FileRideTraceRecorder(
+            store = traceStore,
+            environment = TraceEnvironment(
+                appVersionName = BuildConfig.VERSION_NAME,
+                deviceModel = "${android.os.Build.MANUFACTURER} ${android.os.Build.MODEL}",
+                androidRelease = android.os.Build.VERSION.RELEASE,
+            ),
+        )
+    } else {
+        NoOpRideTraceRecorder
+    }
 }

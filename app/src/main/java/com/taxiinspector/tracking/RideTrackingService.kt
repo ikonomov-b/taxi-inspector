@@ -29,6 +29,7 @@ class RideTrackingService : Service(), TrackingHost, ForegroundSession, ServiceT
             prerequisites = AndroidTrackingPrerequisites(applicationContext),
             clock = container.clock,
             host = this,
+            trace = container.traceRecorder,
         )
         commandRouter = RideServiceCommandRouter(this, controller, this)
     }
