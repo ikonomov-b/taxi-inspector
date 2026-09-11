@@ -12,14 +12,14 @@ Written 2026-09-10 against `1.0.31+8cec2b3a` on a Google Pixel 8 Pro, Android 17
 
 ## What was measured
 
-Two ten-minute stationary holds with the debug ride trace running, test tariff
+Three ten-minute stationary holds with the debug ride trace running, test tariff
 `2.40 / 1.20 / 0.35`:
 
-| Placement | Fixes | Accuracy min / median / max | Inside the 20 m gate | Raw fix-to-fix path | Billed |
-| --- | --- | --- | --- | --- | --- |
-| Indoors, on a desk | 32 | 91 / 137 / 197 m | **0** | 270 m | 0 m, 0 s |
-| Window border | 66 | 111 / 239 / 355 m | **0** | — | 0 m, 0 s |
-| Outdoors | 565 | 19 / 31 / 50 m | **11 (2 %)** | **687 m** | **0 m, 10 s** |
+| Placement | Fixes | Accuracy min / median / max | Inside the 20 m gate | Billed |
+| --- | --- | --- | --- | --- |
+| Indoors, on a desk | 32 | 91 / 137 / 197 m | **0** | 0 m, 0 s |
+| Window border | 66 | 111 / 239 / 355 m | **0** | 0 m, 0 s |
+| Outdoors | 565 | 19 / 31 / 50 m | **11 (2 %)** | **0 m, 10 s** |
 
 Neither indoor run produced a billable fix, and the window border was *worse* than the desk. The
 receiver spent minutes at a time delivering nothing before returning to a 1 Hz stream of 150 m
@@ -40,16 +40,17 @@ satellites the receiver was willing to use drifted between 3 and 8 while more th
 in view. That is the signature of a constellation arriving too weak to trust: a Pixel 8 Pro under
 genuinely open sky reports 35–45 dB-Hz and produces L5 fixes. At 25 dB-Hz this receiver was
 working near its noise floor, dropping satellites from the solution, and the geometry degraded
-with them. The phone was on USB power throughout, and cheap chargers are known to raise the GNSS
-noise floor by about this margin — now a testable proposition rather than a guess, which is what
-the C/N0 column is for.
+with them. The phone was on USB power throughout, which is one of the candidate variables at the
+end of this document and was not controlled here — now a testable proposition rather than a
+guess.
 
-Two conclusions follow, and they point in opposite directions.
+Three things follow from these runs, and the first and last point in opposite directions.
 
 **The engine's conservative contract works, and now there is a number for it.** Summed
 fix-to-fix, the outdoor hold's positions wandered **687 m** in ten minutes while the phone sat
-still on the ground. The engine billed **0 m**. Weak fixes are non-observations, "GPS weak — fare
-frozen" is literally true, and 687 m of noise produced not one fake metre.
+still on the ground; indoors the same sum came to 270 m. The engine billed **0 m** in both, and
+weak fixes are non-observations: "GPS weak — fare frozen" is literally true, and that wander
+produced not one fake metre.
 
 That also corrects the probe in `gps-fidelity-inspection-and-plan.md`, section 4.2, which put
 the noise-driven distance at up to 2 176 m per stationary ten minutes at 20 m accuracy. The probe
@@ -60,18 +61,17 @@ exposure is therefore much smaller than the probe implied — but it has moved r
 to the good-reception case where fixes are accepted and the deadband is only 10–20 m wide. That
 case still needs measuring, and it needs better reception than any of these three runs achieved.
 
-**But waiting time under-reads by two orders of magnitude, and that is the most important
-result here.** The outdoor hold stood still for 600 seconds with more than twenty satellites in
-view, and billed **10 seconds** of time. Indoors it billed none at all. An approved meter, which
-counts time on its own clock, would have billed the full ten minutes in every one of these runs.
+**But waiting time under-reads by roughly sixty times, and that is the most important result
+here.** The outdoor hold stood still for ten minutes with more than twenty satellites in view,
+and billed **10 seconds** of time. Indoors it billed none at all. An approved meter, which counts
+time on its own clock, would have billed the full ten minutes in every one of these runs.
 
 Only intervals between two *accepted* fixes accrue tariff time, so when the gate refuses 98 % of
 fixes there is almost nothing to accrue between. This is the "provisional time-rate accrual
 during a continuously service-owned outage" that `implementation-plan.md` step 8.3 lists as
 undecided, and it is no longer theoretical: a stationary vehicle in ordinary conditions bills
-roughly 2 % of the waiting time it is owed. It remains a deliberate contract decision needing the
-reference-meter comparison behind it rather than a bug, but it is now the largest known
-divergence between this app and the meter it estimates.
+almost none of the waiting time it is owed. It is a contract decision rather than a bug, but it
+is now the largest known divergence between this app and the meter it estimates.
 
 ## What limits reception
 
@@ -149,18 +149,26 @@ and both should be decided together.
 **`LocationRequest` with `QUALITY_HIGH_ACCURACY`** (API 31+, legacy call as the fallback) is
 contract-neutral and cheap. Not done; expected payoff is modest and unmeasured.
 
-**Where the 20 m gate belongs.** This is now the sharpest open question. Outdoors, on a
-flagship phone with 23 satellites in view, the gate refused 98 % of fixes and the app billed
-0 m and 10 s over ten stationary minutes. Loosening it is *not* a reception improvement — it
-admits worse data rather than obtaining better data — but leaving it where it is may mean the app
-bills almost nothing in exactly the conditions a city taxi works in. The decision needs the
-reference-meter comparison from step 8.3, and it should be taken together with the waiting-time
-accrual above, because the two together decide whether the estimate is usable at all in weak
-reception.
+**One gate is answering two questions, and that is the sharpest of these.**
+`BILLING_ACCURACY_METERS` decides both *is this position trustworthy enough to measure a chord
+from* and *is the vehicle still under observation at all*: `rejection()` returns a single
+verdict, and both the loss timer and tariff time advance only on the accepted path, the latter
+only between two accepted fixes. Those are different predicates and they want opposite
+thresholds. Distance-trust is already held independently by the accuracy-scaled deadband
+`max(floor, a_baseline + a_sample)`, which no 31 m fix can clear while standing still; liveness
+needs only a fresh solution that bounds the vehicle somewhere, which a 31 m fix does about as
+well as any evidence available. So the question is not where to move the one gate — loosening
+*that* is not a reception improvement, since it admits worse data rather than obtaining better
+data — but whether liveness should get a bound of its own, which would leave the distance gate
+at 20 m and still keep the time tariff running. The threshold values need the reference-meter
+comparison from step 8.3; the structural half needs no field trip at all, only a pulled hold
+replayed through `TraceReplayTest` with the two predicates separated, checking that the ten
+minutes come back while billed distance stays at 0 m.
 
-A drive will answer part of it by itself: a moving vehicle with a windscreen-mounted phone and a
-clear forward sky view is a different reception regime from a phone lying on the ground, and the
-share of fixes inside the gate is the first number to read off that trace.
+A drive will add the other half: a moving vehicle with a windscreen-mounted phone and a clear
+forward sky view is a different reception regime from a phone lying on the ground, and the
+number to read off that trace is the share of fixes inside the gate against median C/N0 —
+placement is only how C/N0 gets varied.
 
 ## How to compare two placements
 

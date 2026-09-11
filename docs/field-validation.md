@@ -69,13 +69,18 @@ uncertainty in the engine.
 2. `adb shell setprop log.tag.TaxiGnss DEBUG` and `adb logcat -s TaxiGnss > hold.log`, so the
    accuracy the receiver reported is recorded alongside.
 3. Start a ride with the phone still, screen on, for ten minutes. Stop & save.
-4. Do it twice: once on a windowsill (open sky, expect about 4.5 m accuracy) and once behind a
-   parked car's windscreen (expect 5–20 m, and note that athermic glass attenuates GNSS badly).
+4. Do it twice: once on a windowsill and once behind a parked car's windscreen (note that
+   athermic glass attenuates GNSS badly). Record the placement and the median C/N0 with every
+   run; accuracy alone is the receiver's own estimate and does not say whether the placement or
+   the receiver was the problem.
 
-Read the billed distance off Ride Detail. **It should be under about 50 m, with the wait time
-close to the full ten minutes.** Hundreds of metres means the noise floor in the deadband is not
-enough on this hardware, and the wider budget discussed in section 4.2 becomes a real change
-rather than a hypothetical one. `compare_tracks.py` on the pulled trace attributes it per rule.
+Read the billed distance off Ride Detail. **Distance under about 50 m is the pass. Wait time is
+not a pass criterion — a short wait is a known divergence, not a fault in your run:** three holds
+on 2026-09-10 billed 10 seconds and less of their ten minutes, because the 20 m gate refuses the
+fixes the time tariff needs to accrue between (`gps-reception.md`). Hundreds of metres of
+*distance* means the noise floor in the deadband is not enough on this hardware, and the wider
+budget discussed in section 4.2 becomes a real change rather than a hypothetical one.
+`compare_tracks.py` on the pulled trace attributes it per rule.
 
 ## Comparing a drive with Locus Map
 

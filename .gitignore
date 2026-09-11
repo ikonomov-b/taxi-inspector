@@ -8,5 +8,6 @@ __pycache__/
 .kotlin/
 
 # Pulled ride traces. They hold the coordinates of real trips and are field data, not source;
-# scripts/pull-traces.sh writes here by default.
-traces/
+# scripts/pull-traces.sh writes here by default. Root-anchored: the script always writes
+# repo-root-relative, so a checked-in trace fixture under test resources stays addable.
+/traces/
