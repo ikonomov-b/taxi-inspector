@@ -11,6 +11,7 @@ import com.taxiinspector.data.rides.RoomRideRepository
 import com.taxiinspector.ride.ActiveRide
 import com.taxiinspector.ride.Tariff
 import com.taxiinspector.ride.TaxiCompany
+import java.math.BigDecimal
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -35,7 +36,19 @@ class CompanyEditorViewModel(
     private val companyId: String?,
 ) : ViewModel() {
     // An edit starts loading, so the form is never briefly rendered blank over saved values.
-    private val localState = MutableStateFlow(LocalState(isLoading = companyId != null))
+    // Create mode pre-fills the crossover with the product default, so the field is never blank.
+    private val localState = MutableStateFlow(
+        LocalState(
+            isLoading = companyId != null,
+            form = if (companyId == null) {
+                CompanyFormState(
+                    waitingCrossoverKmh = Tariff.DEFAULT_WAITING_CROSSOVER_KILOMETERS_PER_HOUR,
+                )
+            } else {
+                CompanyFormState()
+            },
+        ),
+    )
     private val savedEvents = Channel<Unit>(Channel.BUFFERED)
 
     /** Emitted once the company is durably stored, so the route can leave the screen. */
@@ -94,6 +107,7 @@ class CompanyEditorViewModel(
             }
 
             is CompanyEditorAction.RateChanged -> onRateChanged(action.field, action.value)
+            is CompanyEditorAction.CrossoverChanged -> onCrossoverChanged(action.value)
             CompanyEditorAction.Save -> save()
         }
     }
@@ -115,6 +129,26 @@ class CompanyEditorViewModel(
         }
     }
 
+    private fun onCrossoverChanged(value: String) {
+        localState.update { current ->
+            val parsed = DecimalAmount.parse(value)
+            val crossoverError = when {
+                value.isBlank() -> null
+                parsed == null -> CompanyCrossoverError.Format
+                !isPlausibleCrossover(parsed) -> CompanyCrossoverError.OutOfRange
+                else -> null
+            }
+            current.copy(
+                form = current.form.copy(
+                    waitingCrossoverKmh = value,
+                    isPristine = false,
+                    crossoverError = crossoverError,
+                ),
+                error = null,
+            )
+        }
+    }
+
     private fun save() {
         if (activeRide != null) return
 
@@ -127,14 +161,21 @@ class CompanyEditorViewModel(
         }
         val parsed = CompanyRateField.entries.associateWith { DecimalAmount.parse(form.valueOf(it)) }
         val invalidRates = parsed.filterValues { it == null }.keys
+        val parsedCrossover = DecimalAmount.parse(form.waitingCrossoverKmh)
+        val crossoverError = when {
+            parsedCrossover == null -> CompanyCrossoverError.Format
+            !isPlausibleCrossover(parsedCrossover) -> CompanyCrossoverError.OutOfRange
+            else -> null
+        }
 
-        if (nameError != null || invalidRates.isNotEmpty()) {
+        if (nameError != null || invalidRates.isNotEmpty() || crossoverError != null) {
             localState.update {
                 it.copy(
                     form = it.form.copy(
                         isPristine = false,
                         nameError = nameError,
                         invalidRates = invalidRates,
+                        crossoverError = crossoverError,
                     ),
                 )
             }
@@ -145,6 +186,7 @@ class CompanyEditorViewModel(
             initialTax = requireNotNull(parsed[CompanyRateField.InitialTax]),
             perKmRate = requireNotNull(parsed[CompanyRateField.PerKmRate]),
             perMinuteStillRate = requireNotNull(parsed[CompanyRateField.PerMinuteStillRate]),
+            waitingCrossoverKilometersPerHour = requireNotNull(parsedCrossover),
         )
         viewModelScope.launch {
             // A ride may have started between the check above and this write.
@@ -189,5 +231,17 @@ private fun pristineFormOf(company: TaxiCompany): CompanyFormState = CompanyForm
     initialTax = company.tariff.initialTax.formatConfigured(),
     perKmRate = company.tariff.perKmRate.formatConfigured(),
     perMinuteStillRate = company.tariff.perMinuteStillRate.formatConfigured(),
+    waitingCrossoverKmh = company.tariff.waitingCrossoverKilometersPerHour.formatConfigured(),
     isPristine = true,
 )
+
+/**
+ * Regulated crossovers run 5 km/h (Bulgaria) to 20 km/h (elsewhere in the EU); 30 is comfortably
+ * outside any plausible jurisdiction while still catching a mistyped per-km rate or road speed
+ * limit. Zero is already refused by [Tariff]'s own invariant. This is a guard against an obvious
+ * mistake, not a claim the app knows the locally regulated figure.
+ */
+private fun isPlausibleCrossover(amount: DecimalAmount): Boolean =
+    amount.value.signum() > 0 && amount.value <= MAX_PLAUSIBLE_WAITING_CROSSOVER_KMH
+
+private val MAX_PLAUSIBLE_WAITING_CROSSOVER_KMH: BigDecimal = BigDecimal("30")

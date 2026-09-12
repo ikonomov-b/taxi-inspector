@@ -10,10 +10,12 @@ data class TariffSummary(
     val initialTax: String,
     val perKmRate: String,
     val perMinuteStillRate: String,
+    val waitingCrossoverKilometersPerHour: String,
 )
 
 internal fun Tariff.toSummary(): TariffSummary = TariffSummary(
     initialTax = initialTax.formatConfigured(),
     perKmRate = perKmRate.formatConfigured(),
     perMinuteStillRate = perMinuteStillRate.formatConfigured(),
+    waitingCrossoverKilometersPerHour = waitingCrossoverKilometersPerHour.formatConfigured(),
 )

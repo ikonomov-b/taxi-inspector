@@ -26,6 +26,7 @@ class FileRideTraceRecorderTest {
         initialTax = DecimalAmount.parse("2.40")!!,
         perKmRate = DecimalAmount.parse("1.20")!!,
         perMinuteStillRate = DecimalAmount.parse("0.35")!!,
+        waitingCrossoverKilometersPerHour = DecimalAmount.parse("8")!!,
     )
     private val company = TaxiCompany(id = "company-1", name = "City Taxi", tariff = tariff)
 
@@ -90,7 +91,7 @@ class FileRideTraceRecorderTest {
 
         assertTrue(meta.contains(""""perKmRate": "1.20""""))
         assertTrue(meta.contains(""""deviceModel": "Google Pixel 8 Pro""""))
-        assertTrue(meta.contains(""""fareModel": "modeS-perClosedInterval""""))
+        assertTrue(meta.contains(""""fareModel": "perCompanyCrossover-perClosedInterval""""))
     }
 
     @Test

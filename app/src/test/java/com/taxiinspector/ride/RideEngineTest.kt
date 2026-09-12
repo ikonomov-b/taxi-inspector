@@ -10,16 +10,19 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /**
- * Mode-S expectations for the reducer. The tariff below has a cross-over speed of 4.8611 m/s
- * (17.5 km/h): below it the time tariff earns more over any interval, above it the distance
- * tariff does. Every number asserted here was derived from the tariff, not measured from the
- * implementation.
+ * Attribution expectations for the reducer. The fixture's waiting crossover is 17.5 km/h
+ * (4.8611 m/s), the same figure `1.20`/`0.35` used to derive before the crossover became stored,
+ * per-company data (2026-09-12) — chosen so every tuned expectation below stays valid under a
+ * fixture edit rather than a re-derivation. Below the crossover the time tariff earns more over
+ * any interval; above it the distance tariff does. Every number asserted here was derived from
+ * the tariff, not measured from the implementation.
  */
 class RideEngineTest {
     private val tariff = Tariff(
         initialTax = DecimalAmount.parse("2.40")!!,
         perKmRate = DecimalAmount.parse("1.20")!!,
         perMinuteStillRate = DecimalAmount.parse("0.35")!!,
+        waitingCrossoverKilometersPerHour = DecimalAmount.parse("17.5")!!,
     )
     private val company = TaxiCompany(id = "company-1", name = "Test Taxi", tariff = tariff)
 
@@ -228,9 +231,8 @@ class RideEngineTest {
 
     @Test
     fun `an exact tie bills distance`() {
-        // 0.36 per minute against 1.20 per km puts the cross-over at exactly 5 m/s, and 5 m in
-        // one second earns the same on either tariff.
-        val tied = tariff.copy(perMinuteStillRate = DecimalAmount.parse("0.36")!!)
+        // 18 km/h is exactly 5 m/s, and 5 m in one second earns the same on either tariff.
+        val tied = tariff.copy(waitingCrossoverKilometersPerHour = DecimalAmount.parse("18")!!)
 
         assertEquals(
             RideEngine.Attribution.Distance,
@@ -238,11 +240,108 @@ class RideEngineTest {
         )
     }
 
+    @Test
+    fun `reconcile reads the interval's own tariff, not a shared constant`() {
+        // The same 5 m-in-1 s geometry, above one company's crossover and below another's.
+        val chord = BigDecimal.valueOf(5.0)
+        val lowCrossover = tariff.copy(waitingCrossoverKilometersPerHour = DecimalAmount.parse("3")!!)
+        val highCrossover = tariff.copy(waitingCrossoverKilometersPerHour = DecimalAmount.parse("30")!!)
+
+        assertEquals(RideEngine.Attribution.Distance, RideEngine.reconcile(lowCrossover, chord, 1_000))
+        assertEquals(RideEngine.Attribution.Time, RideEngine.reconcile(highCrossover, chord, 1_000))
+    }
+
+    @Test
+    fun `the same crawl bills distance or time depending on the company's own crossover`() {
+        // 7 km/h: the exact drive speed that motivated storing the crossover per company. Below
+        // this fixture's 17.5 km/h crossover it bills entirely as time; below only a 3 km/h
+        // crossover the same drive clears it and bills as distance instead.
+        val lowCrossoverCompany = company.copy(
+            tariff = tariff.copy(waitingCrossoverKilometersPerHour = DecimalAmount.parse("3")!!),
+        )
+        val sevenKmh = 7_000.0 / 3_600.0
+
+        val underFixtureCrossover = driveAt(company, sevenKmh, fixes = 60)
+        val underLowCrossover = driveAt(lowCrossoverCompany, sevenKmh, fixes = 60)
+
+        assertEquals(0, underFixtureCrossover.distanceMeters.signum())
+        assertTrue(underFixtureCrossover.billedTimeMillis > 0)
+        assertTrue(underLowCrossover.distanceMeters.signum() > 0)
+    }
+
+    @Test
+    fun `the default crossover separates a crawl from ordinary driving`() {
+        val defaultCompany = company.copy(
+            tariff = tariff.copy(
+                waitingCrossoverKilometersPerHour =
+                    DecimalAmount.parse(Tariff.DEFAULT_WAITING_CROSSOVER_KILOMETERS_PER_HOUR)!!,
+            ),
+        )
+
+        val crawl = driveAt(defaultCompany, speedMetersPerSecond = 7_000.0 / 3_600.0, fixes = 60)
+        val ordinary = driveAt(defaultCompany, speedMetersPerSecond = 12_000.0 / 3_600.0, fixes = 60)
+
+        // 7 km/h never clears the crossover, so it can only ever bill as time.
+        assertEquals(0, crawl.distanceMeters.signum())
+        assertTrue(crawl.billedTimeMillis > 0)
+        // 12 km/h clears it, so most of the drive bills as distance; a trailing partial hold can
+        // still owe a little provisional time, which is why this does not assert an exact zero.
+        assertTrue(ordinary.distanceMeters.signum() > 0)
+    }
+
+    // --- Travelled distance ---------------------------------------------------------------
+
+    @Test
+    fun `a distance-won interval increases both distance figures by the same chord`() {
+        var ride = newRide().receive(fix(elapsedMillis = 0, accuracyMeters = 20.0))
+        ride = ride.receive(fix(elapsedMillis = 1_000, northMeters = 50.0, accuracyMeters = 20.0))
+
+        assertEquals(50.0, ride.distanceMeters.toDouble(), 0.1)
+        assertEquals(ride.distanceMeters, ride.travelledDistanceMeters)
+    }
+
+    @Test
+    fun `a time-won interval increases travelled distance but not billed distance`() {
+        val ride = driveProfile(fixes = 60) { 2.0 }
+
+        assertEquals(0, ride.distanceMeters.signum())
+        assertTrue(ride.travelledDistanceMeters.signum() > 0)
+        assertTrue(ride.travelledDistanceMeters > ride.distanceMeters)
+    }
+
+    @Test
+    fun `a held interval increases neither distance figure`() {
+        var ride = newRide().receive(fix(elapsedMillis = 0))
+        for (second in 1..5) {
+            // Half a metre a second, well inside the 10 m deadband: never closes.
+            ride = ride.receive(fix(elapsedMillis = second * 1_000L, northMeters = second * 0.5))
+        }
+
+        assertEquals(0, ride.distanceMeters.signum())
+        assertEquals(0, ride.travelledDistanceMeters.signum())
+    }
+
+    @Test
+    fun `an outlier and a relocation do not increase travelled distance`() {
+        var ride = newRide()
+        for (second in 0..4) {
+            ride = ride.receive(fix(elapsedMillis = second * 1_000L, northMeters = second * 12.0))
+        }
+        val beforeJump = ride.travelledDistanceMeters
+        ride = ride.receive(fix(elapsedMillis = 5_000, northMeters = 60.0, eastMeters = 200.0))
+        ride = ride.receive(fix(elapsedMillis = 6_000, northMeters = 72.0, eastMeters = 200.0))
+
+        // Two mutually plausible outliers relocate without billing the jump as travel either.
+        assertEquals(beforeJump, ride.travelledDistanceMeters)
+    }
+
     // --- Probe regressions --------------------------------------------------------------
 
     @Test
-    fun `the ten minute jam matches the mode S meter`() {
-        // 7 km/h for ten minutes: a mode-S meter bills ten minutes of time, 5.90 in total.
+    fun `the ten minute jam bills as a mode S meter would at this company's crossover`() {
+        // 7 km/h for ten minutes, below this fixture's 17.5 km/h crossover: bills ten minutes
+        // of time, 5.90 in total. At a company configured with a lower crossover (below 7 km/h)
+        // the same drive would bill as distance instead; see the crossover-dependent tests below.
         val ride = driveProfile(fixes = 601) { 7_000.0 / 3_600.0 }
 
         assertEquals(600_000, ride.billedTimeMillis)
@@ -288,7 +387,7 @@ class RideEngineTest {
     }
 
     @Test
-    fun `creep with three stops matches the mode S meter`() {
+    fun `creep with three stops bills as a mode S meter would at this company's crossover`() {
         val stopped = { second: Int -> second in 10..29 || second in 50..69 || second in 90..109 }
         val ride = driveProfile(fixes = 121) { if (stopped(it)) 0.0 else 2.0 }
 
@@ -638,6 +737,8 @@ class RideEngineTest {
         val summary = RideEngine.finish(holding, 60_000)
         assertEquals(60_000, summary.timeTariffMillis)
         assertEquals("2.75", summary.total.formatTotal(Locale.US))
+        // Stationary the whole ride: no interval ever closes, so nothing was travelled either.
+        assertEquals(0, summary.travelledDistanceMeters?.signum())
 
         val interrupted = RideEngine.interrupt(holding)
         assertEquals(RidePhase.PendingInterrupted, interrupted.phase)
@@ -645,6 +746,16 @@ class RideEngineTest {
         assertEquals(0, interrupted.provisionalTimeMillis)
         assertNull(interrupted.lastBillablePoint)
         assertNull(interrupted.lastAcceptedFix)
+    }
+
+    @Test
+    fun `finish carries travelled distance into the summary`() {
+        val ride = driveProfile(fixes = 60) { 2.0 }
+
+        val summary = RideEngine.finish(ride, 59_000)
+
+        assertEquals(ride.travelledDistanceMeters, summary.travelledDistanceMeters)
+        assertTrue(summary.travelledDistanceMeters!!.signum() > 0)
     }
 
     @Test
@@ -718,6 +829,10 @@ class RideEngineTest {
                 ride.lastAcceptedFix!!.fixElapsedMillis - firstFixElapsedMillis!!,
                 ride.billedTimeMillis + distanceTimeMillis,
             )
+
+            // Travelled distance is a superset of billed distance: never smaller, and equal to
+            // it plus whatever a closed interval redirected to the time tariff instead.
+            assertTrue("second=$second", ride.travelledDistanceMeters >= ride.distanceMeters)
         }
     }
 
@@ -821,6 +936,21 @@ class RideEngineTest {
 
     private fun newRide() = RideEngine.start("ride-1", company, 0)
 
+    /** Like [driveProfile], but for a company other than the class-level fixture. */
+    private fun driveAt(
+        drivingCompany: TaxiCompany,
+        speedMetersPerSecond: Double,
+        fixes: Int,
+    ): ActiveRide {
+        var ride = RideEngine.start("crossover-ride", drivingCompany, 0)
+        var travelled = 0.0
+        for (index in 0 until fixes) {
+            ride = ride.receive(fix(elapsedMillis = index * 1_000L, northMeters = travelled))
+            travelled += speedMetersPerSecond
+        }
+        return ride
+    }
+
     private fun ActiveRide.receive(
         sample: LocationSample,
         nowElapsedMillis: Long = sample.receivedElapsedMillis,
@@ -909,8 +1039,8 @@ class RideEngineTest {
         const val BASE_LATITUDE = 42.6977
         const val BASE_LONGITUDE = 23.3219
 
-        /** 0.35 per minute against 1.20 per km. */
-        const val CROSSOVER_METERS_PER_SECOND = 350.0 / 72.0
+        /** The fixture's own stored crossover, 17.5 km/h. */
+        const val CROSSOVER_METERS_PER_SECOND = 17.5 / 3.6
 
         val METERS_PER_DEGREE_LATITUDE = Geodesic.distanceMeters(
             BASE_LATITUDE,

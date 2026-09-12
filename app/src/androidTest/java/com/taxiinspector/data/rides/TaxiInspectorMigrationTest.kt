@@ -186,11 +186,18 @@ class TaxiInspectorMigrationTest {
         }
     }
 
-    /** Validates the migrated schema against the exported version-2 schema before reading it. */
+    /**
+     * Validates the migrated schema against the exported version-2 schema, then opens the
+     * database at the current version. The builder must carry `MIGRATION_2_3` as well: the file
+     * on disk stops at version 2 here, while `@Database` has since moved on, so opening it with
+     * only the 1-to-2 migration registered fails with "a migration from 2 to 3 was required but
+     * not found". Nothing this test asserts is changed by the later migration, which only adds
+     * columns.
+     */
     private fun migrateToVersionTwo(): TaxiInspectorDatabase {
         migrationHelper.runMigrationsAndValidate(TEST_DATABASE, 2, true, MIGRATION_1_2).close()
         return Room.databaseBuilder(context, TaxiInspectorDatabase::class.java, TEST_DATABASE)
-            .addMigrations(MIGRATION_1_2)
+            .addMigrations(MIGRATION_1_2, MIGRATION_2_3)
             .build()
     }
 
@@ -241,6 +248,7 @@ class TaxiInspectorMigrationTest {
         initialTax = DecimalAmount.parse(initialTax)!!,
         perKmRate = DecimalAmount.parse(perKm)!!,
         perMinuteStillRate = DecimalAmount.parse(perMinute)!!,
+        waitingCrossoverKilometersPerHour = DecimalAmount.parse("8")!!,
     )
 
     private companion object {

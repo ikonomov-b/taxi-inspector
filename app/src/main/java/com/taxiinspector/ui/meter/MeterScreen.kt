@@ -180,6 +180,7 @@ private fun SelectedCompany(state: MeterUiState, onAction: (MeterAction) -> Unit
                             tariff.initialTax,
                             tariff.perKmRate,
                             tariff.perMinuteStillRate,
+                            tariff.waitingCrossoverKilometersPerHour,
                         ),
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -230,6 +231,7 @@ private fun CompanySelectorDialog(
                         company.tariff.initialTax,
                         company.tariff.perKmRate,
                         company.tariff.perMinuteStillRate,
+                        company.tariff.waitingCrossoverKilometersPerHour,
                     )
                     Row(
                         modifier = Modifier

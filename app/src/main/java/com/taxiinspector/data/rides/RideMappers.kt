@@ -19,6 +19,7 @@ internal fun TaxiCompanyEntity.toDomain(): TaxiCompany = TaxiCompany(
         initialTax = initialTax.toDecimalAmount(),
         perKmRate = perKmRate.toDecimalAmount(),
         perMinuteStillRate = perMinuteStillRate.toDecimalAmount(),
+        waitingCrossoverKilometersPerHour = waitingCrossoverKilometersPerHour.toDecimalAmount(),
     ),
 )
 
@@ -29,6 +30,7 @@ internal fun TaxiCompany.toEntity(): TaxiCompanyEntity = TaxiCompanyEntity(
     initialTax = tariff.initialTax.value.toPlainString(),
     perKmRate = tariff.perKmRate.value.toPlainString(),
     perMinuteStillRate = tariff.perMinuteStillRate.value.toPlainString(),
+    waitingCrossoverKilometersPerHour = tariff.waitingCrossoverKilometersPerHour.value.toPlainString(),
 )
 
 internal fun ActiveRide.toEntity(): ActiveRideEntity = ActiveRideEntity(
@@ -37,9 +39,11 @@ internal fun ActiveRide.toEntity(): ActiveRideEntity = ActiveRideEntity(
     initialTax = tariff.initialTax.value.toPlainString(),
     perKmRate = tariff.perKmRate.value.toPlainString(),
     perMinuteStillRate = tariff.perMinuteStillRate.value.toPlainString(),
+    waitingCrossoverKilometersPerHour = tariff.waitingCrossoverKilometersPerHour.value.toPlainString(),
     phase = phase.name,
     trackingStatus = trackingStatus.name,
     distanceMeters = distanceMeters.toPlainString(),
+    travelledDistanceMeters = travelledDistanceMeters.toPlainString(),
     // The column keeps its version-1 name and holds committed plus provisional time together:
     // every path that persists a ride has either committed the hold or is storing a confirmed
     // total, so the sum is exact and no migration is needed.
@@ -66,10 +70,16 @@ internal fun ActiveRide.toEntity(): ActiveRideEntity = ActiveRideEntity(
 internal fun ActiveRideEntity.toDomain(): ActiveRide = ActiveRide(
     id = id,
     companyName = companyName,
-    tariff = Tariff(initialTax.toDecimalAmount(), perKmRate.toDecimalAmount(), perMinuteStillRate.toDecimalAmount()),
+    tariff = Tariff(
+        initialTax.toDecimalAmount(),
+        perKmRate.toDecimalAmount(),
+        perMinuteStillRate.toDecimalAmount(),
+        waitingCrossoverKilometersPerHour.toDecimalAmount(),
+    ),
     phase = RidePhase.valueOf(phase),
     trackingStatus = TrackingStatus.valueOf(trackingStatus),
     distanceMeters = BigDecimal(distanceMeters),
+    travelledDistanceMeters = BigDecimal(travelledDistanceMeters),
     timeTariffMillis = idleMillis,
     provisionalTimeMillis = 0,
     motionState = MotionState.valueOf(motionState),
@@ -91,8 +101,10 @@ internal fun SavedRideSummary.toEntity(): RideSummaryEntity = RideSummaryEntity(
     initialTax = summary.tariff.initialTax.value.toPlainString(),
     perKmRate = summary.tariff.perKmRate.value.toPlainString(),
     perMinuteStillRate = summary.tariff.perMinuteStillRate.value.toPlainString(),
+    waitingCrossoverKilometersPerHour = summary.tariff.waitingCrossoverKilometersPerHour.value.toPlainString(),
     total = summary.total.value.toPlainString(),
     distanceMeters = summary.distanceMeters.toPlainString(),
+    travelledDistanceMeters = summary.travelledDistanceMeters?.toPlainString(),
     idleMillis = summary.timeTariffMillis,
     elapsedMillis = summary.elapsedMillis,
     endedElapsedMillis = summary.endedElapsedMillis,
@@ -104,9 +116,15 @@ internal fun RideSummaryEntity.toDomain(): SavedRideSummary = SavedRideSummary(
     summary = RideSummary(
         id = id,
         companyName = companyName,
-        tariff = Tariff(initialTax.toDecimalAmount(), perKmRate.toDecimalAmount(), perMinuteStillRate.toDecimalAmount()),
+        tariff = Tariff(
+            initialTax.toDecimalAmount(),
+            perKmRate.toDecimalAmount(),
+            perMinuteStillRate.toDecimalAmount(),
+            waitingCrossoverKilometersPerHour.toDecimalAmount(),
+        ),
         total = total.toDecimalAmount(),
         distanceMeters = BigDecimal(distanceMeters),
+        travelledDistanceMeters = travelledDistanceMeters?.let { BigDecimal(it) },
         timeTariffMillis = idleMillis,
         elapsedMillis = elapsedMillis,
         endedElapsedMillis = endedElapsedMillis,

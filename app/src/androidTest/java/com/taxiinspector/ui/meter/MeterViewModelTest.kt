@@ -87,7 +87,7 @@ class MeterViewModelTest {
 
         val state = awaitState { it.company?.name == "Night Cabs" }
         assertEquals(false, state.isCompanySelectorVisible)
-        assertEquals(TariffSummary("5", "2", "0.5"), state.company?.tariff)
+        assertEquals(TariffSummary("5", "2", "0.5", "8"), state.company?.tariff)
         assertEquals(night.id, state.selectedCompanyId)
         // Selecting a name selects all three of its rates together, durably.
         assertEquals("Night Cabs", repository.selectedCompany()?.name)
@@ -153,7 +153,7 @@ class MeterViewModelTest {
         val locked = awaitState { !it.canManageCompanies }
         assertEquals(false, locked.canStart)
         // The ride's own locked snapshot, and nothing selectable while it holds it.
-        assertEquals(MeterCompany("City Taxi", TariffSummary("2.4", "1.2", "0.35")), locked.company)
+        assertEquals(MeterCompany("City Taxi", TariffSummary("2.4", "1.2", "0.35", "8")), locked.company)
         assertTrue(locked.companies.isEmpty())
         assertNull(locked.selectedCompanyId)
     }
@@ -167,7 +167,7 @@ class MeterViewModelTest {
         val state = awaitState { it.company != null && it.company?.name == null }
         assertNull(state.company?.name)
         // Its own locked rates still show, so the fare stays explainable.
-        assertEquals(TariffSummary("2.4", "1.2", "0.35"), state.company?.tariff)
+        assertEquals(TariffSummary("2.4", "1.2", "0.35", "8"), state.company?.tariff)
     }
 
     @Test
@@ -175,7 +175,11 @@ class MeterViewModelTest {
         saveCompany()
         val ride = repository.startRide("ride-fare", 1_000)
         repository.updateActiveRide(
-            ride.copy(distanceMeters = BigDecimal("2500"), timeTariffMillis = 180_000),
+            ride.copy(
+                distanceMeters = BigDecimal("2500"),
+                travelledDistanceMeters = BigDecimal("2500"),
+                timeTariffMillis = 180_000,
+            ),
         )
 
         val presentation = awaitState { it.presentation.distance != "0.00" }.presentation
@@ -291,6 +295,7 @@ class MeterViewModelTest {
         initialTax = requireNotNull(DecimalAmount.parse(initialTax)),
         perKmRate = requireNotNull(DecimalAmount.parse(perKm)),
         perMinuteStillRate = requireNotNull(DecimalAmount.parse(perMinute)),
+        waitingCrossoverKilometersPerHour = requireNotNull(DecimalAmount.parse("8")),
     )
 
     private companion object {

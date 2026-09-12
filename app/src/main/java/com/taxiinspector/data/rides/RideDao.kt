@@ -181,6 +181,8 @@ abstract class RideDao {
                 initialTax = tariff.initialTax.value.toPlainString(),
                 perKmRate = tariff.perKmRate.value.toPlainString(),
                 perMinuteStillRate = tariff.perMinuteStillRate.value.toPlainString(),
+                waitingCrossoverKilometersPerHour =
+                    tariff.waitingCrossoverKilometersPerHour.value.toPlainString(),
             ).also { updateCompany(it) }
         }
 

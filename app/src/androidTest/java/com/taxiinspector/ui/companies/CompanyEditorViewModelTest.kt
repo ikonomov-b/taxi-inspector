@@ -199,6 +199,7 @@ class CompanyEditorViewModelTest {
         initialTax = requireNotNull(DecimalAmount.parse(initialTax)),
         perKmRate = requireNotNull(DecimalAmount.parse(perKm)),
         perMinuteStillRate = requireNotNull(DecimalAmount.parse(perMinute)),
+        waitingCrossoverKilometersPerHour = requireNotNull(DecimalAmount.parse("8")),
     )
 
     private companion object {

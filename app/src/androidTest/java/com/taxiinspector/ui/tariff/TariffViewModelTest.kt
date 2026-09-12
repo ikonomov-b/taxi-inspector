@@ -62,7 +62,7 @@ class TariffViewModelTest {
         assertEquals(Unit, withTimeout(TIMEOUT_MILLIS) { savedEvents.receive() })
         assertEquals(tariff("2.40", "1.20", "0.35"), repository.currentTariff())
         assertEquals(
-            TariffSummary("2.4", "1.2", "0.35"),
+            TariffSummary("2.4", "1.2", "0.35", "8"),
             awaitState { it.savedTariff != null }.savedTariff,
         )
     }
@@ -134,6 +134,9 @@ class TariffViewModelTest {
         initialTax = requireNotNull(DecimalAmount.parse(initialTax)),
         perKmRate = requireNotNull(DecimalAmount.parse(perKm)),
         perMinuteStillRate = requireNotNull(DecimalAmount.parse(perMinute)),
+        // This parked, unwired editor writes the product default; see project-memory.md.
+        waitingCrossoverKilometersPerHour =
+            requireNotNull(DecimalAmount.parse(Tariff.DEFAULT_WAITING_CROSSOVER_KILOMETERS_PER_HOUR)),
     )
 
     private companion object {

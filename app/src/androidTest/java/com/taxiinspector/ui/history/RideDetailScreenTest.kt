@@ -27,7 +27,10 @@ class RideDetailScreenTest {
         composeRule.onNodeWithText("6.45").assertIsDisplayed()
         composeRule.onNodeWithText("Completed").assertIsDisplayed()
         composeRule.onNodeWithText("Sep 4, 2026, 2:30 PM").assertIsDisplayed()
+        composeRule.onNodeWithText("Billed distance").assertIsDisplayed()
+        composeRule.onNodeWithText("Distance travelled").assertIsDisplayed()
         composeRule.onNodeWithText("2.50 km").assertIsDisplayed()
+        composeRule.onNodeWithText("3.10 km").assertIsDisplayed()
         composeRule.onNodeWithText("03:18").assertIsDisplayed()
         composeRule.onNodeWithText("1:04:09").assertIsDisplayed()
         composeRule.onNodeWithText("Locked tariff").assertIsDisplayed()
@@ -71,6 +74,17 @@ class RideDetailScreenTest {
     }
 
     @Test
+    fun aSummaryWithNoRecordedTravelledDistanceShowsItAsUnrecorded() {
+        render(
+            detailState().let { state ->
+                state.copy(ride = requireNotNull(state.ride).copy(travelledDistanceKilometres = null))
+            },
+        )
+
+        composeRule.onNodeWithText("Not recorded").performScrollTo().assertIsDisplayed()
+    }
+
+    @Test
     fun aSummaryRecordedBeforeCompaniesExistedIsLabelledRatherThanNamed() {
         render(
             detailState().let { state ->
@@ -89,6 +103,7 @@ class RideDetailScreenTest {
             endedAt = "Sep 4, 2026, 2:30 PM",
             total = "6.45",
             distanceKilometres = "2.50",
+            travelledDistanceKilometres = "3.10",
             waitTime = "03:18",
             elapsedTime = "1:04:09",
             initialTax = "2.4",

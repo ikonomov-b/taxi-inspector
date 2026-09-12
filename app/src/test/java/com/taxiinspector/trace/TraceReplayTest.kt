@@ -95,10 +95,21 @@ class TraceReplayTest {
         val meta = directory?.resolve("meta.json")?.takeIf { it.isFile }?.readText()
         fun read(key: String, fallback: String): String =
             meta?.let { Regex("\"$key\":\\s*\"([^\"]*)\"").find(it)?.groupValues?.get(1) } ?: fallback
+
+        // Older traces, captured before the waiting crossover became stored per company, carry
+        // no such key at all; the fallback then differs from what the ride actually billed with,
+        // so it is printed rather than applied silently.
+        val crossover = read(
+            "waitingCrossoverKilometersPerHour",
+            Tariff.DEFAULT_WAITING_CROSSOVER_KILOMETERS_PER_HOUR,
+        )
+        println("waiting crossover used for this replay: $crossover km/h")
+
         return Tariff(
             initialTax = DecimalAmount.parse(read("initialTax", "2.40"))!!,
             perKmRate = DecimalAmount.parse(read("perKmRate", "1.20"))!!,
             perMinuteStillRate = DecimalAmount.parse(read("perMinuteStillRate", "0.35"))!!,
+            waitingCrossoverKilometersPerHour = DecimalAmount.parse(crossover)!!,
         )
     }
 

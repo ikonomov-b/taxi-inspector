@@ -22,6 +22,7 @@ class TraceFormatTest {
         initialTax = DecimalAmount.parse("2.40")!!,
         perKmRate = DecimalAmount.parse("1.20")!!,
         perMinuteStillRate = DecimalAmount.parse("0.35")!!,
+        waitingCrossoverKilometersPerHour = DecimalAmount.parse("8")!!,
     )
 
     private val meta = TraceMeta(
@@ -170,7 +171,7 @@ class TraceFormatTest {
 
         assertTrue(json.contains(""""rideId": "ride-1""""))
         assertTrue(json.contains(""""perKmRate": "1.20""""))
-        assertTrue(json.contains(""""crossoverSpeedMetersPerSecond": 4.861111"""))
+        assertTrue(json.contains(""""waitingCrossoverKilometersPerHour": "8""""))
         assertTrue(json.contains(""""startedUtc": "2026-09-10T12:34:56.789Z""""))
         assertTrue(json.contains(""""gpsLossMillis": "15000""""))
         // A name with a quote in it must not produce invalid JSON.

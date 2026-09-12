@@ -133,6 +133,7 @@ private fun CompanyRow(
         company.tariff.initialTax,
         company.tariff.perKmRate,
         company.tariff.perMinuteStillRate,
+        company.tariff.waitingCrossoverKilometersPerHour,
     )
     Row(
         modifier = Modifier

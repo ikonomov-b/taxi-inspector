@@ -100,9 +100,10 @@ fun CompanyEditorScreen(
                 label = stringResource(R.string.tariff_per_minute),
                 field = CompanyRateField.PerMinuteStillRate,
                 state = state,
-                imeAction = ImeAction.Done,
+                imeAction = ImeAction.Next,
                 onAction = onAction,
             )
+            CrossoverField(state = state, onAction = onAction)
 
             Text(
                 text = stringResource(R.string.tariff_unit_notice),
@@ -176,6 +177,37 @@ private fun RateField(
         keyboardOptions = KeyboardOptions(
             keyboardType = KeyboardType.Decimal,
             imeAction = imeAction,
+        ),
+        modifier = Modifier.fillMaxWidth(),
+    )
+}
+
+@Composable
+private fun CrossoverField(
+    state: CompanyEditorUiState,
+    onAction: (CompanyEditorAction) -> Unit,
+) {
+    OutlinedTextField(
+        value = state.form.waitingCrossoverKmh,
+        onValueChange = { onAction(CompanyEditorAction.CrossoverChanged(it)) },
+        label = { Text(stringResource(R.string.company_waiting_crossover)) },
+        enabled = !state.isLocked,
+        isError = state.form.crossoverError != null,
+        singleLine = true,
+        supportingText = {
+            Text(
+                stringResource(
+                    when (state.form.crossoverError) {
+                        CompanyCrossoverError.Format -> R.string.tariff_invalid_field
+                        CompanyCrossoverError.OutOfRange -> R.string.company_waiting_crossover_range
+                        null -> R.string.company_waiting_crossover_notice
+                    },
+                ),
+            )
+        },
+        keyboardOptions = KeyboardOptions(
+            keyboardType = KeyboardType.Decimal,
+            imeAction = ImeAction.Done,
         ),
         modifier = Modifier.fillMaxWidth(),
     )

@@ -20,7 +20,7 @@ class AppContainer(context: Context) {
         context.applicationContext,
         TaxiInspectorDatabase::class.java,
         "taxi-inspector.db",
-    ).addMigrations(MIGRATION_1_2).build()
+    ).addMigrations(MIGRATION_1_2, MIGRATION_2_3).build()
 
     val rideRepository: RoomRideRepository = RoomRideRepository(database.rideDao())
     val locationClient: LocationClient = AndroidGpsLocationClient(context.applicationContext)

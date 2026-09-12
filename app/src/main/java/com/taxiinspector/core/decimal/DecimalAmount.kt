@@ -6,8 +6,10 @@ import java.text.DecimalFormatSymbols
 import java.util.Locale
 
 /**
- * An exact, non-negative number expressed in the tariff unit chosen by the user.
- * It deliberately has no currency code, symbol, or conversion behaviour.
+ * An exact, non-negative user-entered decimal. When it carries money it is expressed in the
+ * tariff unit chosen by the user, with no currency code, symbol, or conversion behaviour; it is
+ * also used for other exact user-entered values, such as a tariff's waiting-crossover speed,
+ * that should share the same input grammar and rounding rather than a separate float path.
  */
 @JvmInline
 value class DecimalAmount private constructor(val value: BigDecimal) : Comparable<DecimalAmount> {

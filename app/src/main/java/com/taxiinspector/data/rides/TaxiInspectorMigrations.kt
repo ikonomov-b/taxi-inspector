@@ -2,6 +2,7 @@ package com.taxiinspector.data.rides
 
 import androidx.room.migration.Migration
 import androidx.sqlite.db.SupportSQLiteDatabase
+import com.taxiinspector.ride.Tariff
 import com.taxiinspector.ride.TaxiCompany
 
 /**
@@ -57,5 +58,50 @@ val MIGRATION_1_2 = object : Migration(1, 2) {
 
         db.execSQL("ALTER TABLE `active_ride` ADD COLUMN `companyName` TEXT")
         db.execSQL("ALTER TABLE `ride_summary` ADD COLUMN `companyName` TEXT")
+    }
+}
+
+/**
+ * Version 3 adds two independent, additive components: a per-company waiting-crossover speed
+ * (`RideEngine` used to derive this from the two money rates; field evidence showed that formula
+ * billed ordinary slow city driving entirely as waiting time, so it became stored, user-edited
+ * data instead) and a second distance aggregate that records every closed interval's chord
+ * regardless of which tariff won it, so a saved ride shows both what was billed and what was
+ * actually driven.
+ *
+ * Both are non-destructive additive columns on the same three tables in one migration, since
+ * shipping two versions this session for two changes landing together would leave a version no
+ * build ever released, untested on its own. Existing companies and rides get the product-default
+ * crossover; an in-flight active ride's travelled distance is backfilled from its own billed
+ * distance, since that is the true lower bound for a ride that has not yet closed an interval on
+ * the time tariff since the upgrade. A saved summary's travelled distance is left null: it is the
+ * true historic figure that is unknown, not zero, so inventing a number would misrepresent a
+ * ride the app never measured this way.
+ */
+val MIGRATION_2_3 = object : Migration(2, 3) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        val defaultCrossover = Tariff.DEFAULT_WAITING_CROSSOVER_KILOMETERS_PER_HOUR
+
+        db.execSQL(
+            "ALTER TABLE `taxi_company` ADD COLUMN `waitingCrossoverKilometersPerHour` " +
+                "TEXT NOT NULL DEFAULT '$defaultCrossover'",
+        )
+        db.execSQL(
+            "ALTER TABLE `active_ride` ADD COLUMN `waitingCrossoverKilometersPerHour` " +
+                "TEXT NOT NULL DEFAULT '$defaultCrossover'",
+        )
+        db.execSQL(
+            "ALTER TABLE `ride_summary` ADD COLUMN `waitingCrossoverKilometersPerHour` " +
+                "TEXT NOT NULL DEFAULT '$defaultCrossover'",
+        )
+
+        db.execSQL(
+            "ALTER TABLE `active_ride` ADD COLUMN `travelledDistanceMeters` TEXT NOT NULL DEFAULT '0'",
+        )
+        db.execSQL("UPDATE `active_ride` SET `travelledDistanceMeters` = `distanceMeters`")
+
+        // Nullable and defaultless: an existing summary's true travelled distance is unknown,
+        // not zero, so it is left unrecorded rather than backfilled with a guess.
+        db.execSQL("ALTER TABLE `ride_summary` ADD COLUMN `travelledDistanceMeters` TEXT")
     }
 }

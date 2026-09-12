@@ -168,13 +168,15 @@ app/
 ### Ride models
 
 ```text
-Tariff(initialTax, perKmRate, perMinuteStillRate) // all in one user-defined unit
+Tariff(initialTax, perKmRate, perMinuteStillRate, waitingCrossoverKilometersPerHour)
+           // all in one user-defined unit; the crossover is km/h and stored, not derived
 TaxiCompany(id, name, tariff)
-ActiveRide(id, companyName, tariff, phase, trackingStatus, distanceMeters, idleMillis,
+ActiveRide(id, companyName, tariff, phase, trackingStatus, distanceMeters,
+           travelledDistanceMeters, idleMillis,
            movingOrIdle, startedAt, lastConfirmedAt, lastBillablePoint,
            speedCandidateState)
-RideSummary(id, companyName, tariff, total, distanceMeters, idleMillis, elapsedMillis,
-            endedAt, status)
+RideSummary(id, companyName, tariff, total, distanceMeters, travelledDistanceMeters,
+            idleMillis, elapsedMillis, endedAt, status)
 ```
 
 - Amounts are `BigDecimal`-backed `DecimalAmount` values. Rates and the final calculation are never `Double` or `Float`; no model carries a currency identifier because the app intentionally supports any user-entered tariff unit.
@@ -189,6 +191,8 @@ Room stores up to ten `TaxiCompanyEntity` rows, one `AppSettingsEntity` containi
 Starting a ride atomically resolves the selected company and copies its name and tariff into the active row. Neither active nor historic display joins back to mutable company data. `RideDao.finishRide()` runs in a database transaction: insert the already locked snapshot as a summary, delete the active row, and remove rows older than the ten newest. This makes the ten-ride history limit correct even if the process stops during a save, and company edits or deletion cannot change historic identity or totals.
 
 The database has an explicit version and forward migrations. Destructive migration is prohibited: an update must preserve company tariffs, selection where possible, active state, and history data, and every migration has a Room migration test. `MIGRATION_1_2` migrates the version-1 singleton tariff into one selected placeholder company without changing its exact decimal strings, and rebuilds the settings row because its tariff columns go away. Pre-company active rides and summaries keep their own locked tariff and store `companyName` as NULL; the legacy/unavailable label is a UI string, so no invented identity is ever written to the database. The active row is updated after every accepted GPS point, every one-second tick that changes wait cost, and every pause/resume/stop state transition. At most one small local write per second occurs during an idle ride.
+
+The database is now version 3. `MIGRATION_2_3` adds two independent, additive columns to `taxi_company`, `active_ride`, and `ride_summary`: `waitingCrossoverKilometersPerHour` and (on the ride tables only) `travelledDistanceMeters`. The two migrated columns follow different rules, and the distinction matters: **configuration may take a default; an observation may not be invented.** The crossover is configuration, so every existing company and ride gets the product default (`8`). Travelled distance on an existing *active* ride is backfilled from that ride's own already-billed `distanceMeters` — the true lower bound for a ride that has not yet closed an interval on the time tariff since the upgrade — but an existing *summary*'s travelled distance is left `NULL`, meaning "not recorded," because it is a genuinely unknown historic observation that inventing a number would misrepresent.
 
 ## Fare and session logic
 
@@ -220,7 +224,7 @@ The reducer's acceptance policy must validate endpoint quality, monotonic time w
 
 For a verified mode-S reference, the recovered variable charge is the larger of the exact time candidate and exact distance candidate. The engine attributes the interval to one component only and may replace provisional time with distance on reacquisition. For mode D it is their sum, which requires an explicit change to the product's mutual-exclusivity rule. For the present custom stationary-wait model, endpoint average speed is insufficient to reproduce mixed stop-and-go behavior and remains experimental. Do not implement a gap-specific taximeter mode while leaving ordinary intervals on a contradictory model.
 
-The existing name `idleMillis` is valid only for the current stationary-wait contract. If the chosen reference charges a time tariff below a tariff-derived cross-over speed, rename the domain/persistence/presentation concept to tariff-time duration and apply that model consistently to observed and reconstructed intervals. Fare resolution/increment behavior must also be captured if matching the displayed reference-meter amount, rather than only its continuous underlying fare.
+The existing name `idleMillis` is valid only for the current stationary-wait contract. If the chosen reference charges a time tariff below a cross-over speed, rename the domain/persistence/presentation concept to tariff-time duration and apply that model consistently to observed and reconstructed intervals. Fare resolution/increment behavior must also be captured if matching the displayed reference-meter amount, rather than only its continuous underlying fare. **Amended 2026-09-12:** the engine does charge a time tariff below a cross-over speed, so the domain concept is already `timeTariffMillis`; only the Room column still reads `idleMillis`. That cross-over is no longer *tariff-derived* either — it is `Tariff.waitingCrossoverKilometersPerHour`, stored per company and set by the user, so a reference-meter comparison must record the crossover the company was configured with, not infer it from the two money rates.
 
 An approved provisional estimator also needs a distinct visible status such as `GpsLostEstimating`; reusing `GpsLost` with its current “fare frozen” presentation while the total advances would be false. That status remains domain-owned and is rendered consistently by the notification and Meter UI.
 

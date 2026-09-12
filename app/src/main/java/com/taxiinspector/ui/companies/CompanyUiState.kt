@@ -70,14 +70,24 @@ enum class CompanyEditorError { DuplicateName, LimitReached, SaveFailed }
 
 enum class CompanyNameError { Blank, TooLong }
 
+/**
+ * The waiting-crossover field is asked a second question the three rates are not: not just "is
+ * this a well-formed non-negative decimal" ([Format], shared with [CompanyRateField]) but also
+ * "is this a plausible speed" ([OutOfRange]) — regulated crossovers run 5-20 km/h, so this catches
+ * a mistyped per-km rate or road speed limit without asserting the app knows the local rule.
+ */
+enum class CompanyCrossoverError { Format, OutOfRange }
+
 /** The entry fields; while [isPristine] they mirror the saved company exactly. */
 data class CompanyFormState(
     val name: String = "",
     val initialTax: String = "",
     val perKmRate: String = "",
     val perMinuteStillRate: String = "",
+    val waitingCrossoverKmh: String = "",
     val nameError: CompanyNameError? = null,
     val invalidRates: Set<CompanyRateField> = emptySet(),
+    val crossoverError: CompanyCrossoverError? = null,
     val isPristine: Boolean = true,
 ) {
     fun valueOf(field: CompanyRateField): String = when (field) {
@@ -97,6 +107,8 @@ sealed interface CompanyEditorAction {
     data class NameChanged(val value: String) : CompanyEditorAction
 
     data class RateChanged(val field: CompanyRateField, val value: String) : CompanyEditorAction
+
+    data class CrossoverChanged(val value: String) : CompanyEditorAction
 
     data object Save : CompanyEditorAction
 }

@@ -37,7 +37,7 @@ class CompanyScreenTest {
 
         composeRule.onNodeWithText("No taxi companies saved").assertIsDisplayed()
         composeRule
-            .onNodeWithText("Save a company and its three rates before starting a ride.")
+            .onNodeWithText("Save a company and its rates before starting a ride.")
             .assertIsDisplayed()
         composeRule.onNodeWithText("Add company").assertIsEnabled().performClick()
 
@@ -67,9 +67,9 @@ class CompanyScreenTest {
         renderList(listState())
 
         // The selectable row merges its children, so each option is announced as a whole.
-        composeRule.onNode(hasText("City Taxi") and hasText("Initial 2.4 · 1.2/km · 0.35/min"))
+        composeRule.onNode(hasText("City Taxi") and hasText("Initial 2.4 · 1.2/km · 0.35/min · wait below 8 km/h"))
             .assertExists()
-        composeRule.onNode(hasText("Night Cabs") and hasText("Initial 5 · 2/km · 0.5/min"))
+        composeRule.onNode(hasText("Night Cabs") and hasText("Initial 5 · 2/km · 0.5/min · wait below 5 km/h"))
             .assertExists()
     }
 
@@ -144,7 +144,7 @@ class CompanyScreenTest {
         renderEditor(CompanyEditorUiState(), onCancel = null)
 
         composeRule
-            .onNodeWithText("Name the taxi company and enter its three rates before starting a ride.")
+            .onNodeWithText("Name the taxi company and enter its rates before starting a ride.")
             .assertIsDisplayed()
         composeRule.onNodeWithText("Cancel").assertDoesNotExist()
     }
@@ -243,8 +243,8 @@ class CompanyScreenTest {
     private fun listState() = CompanyListUiState(
         isLoading = false,
         companies = listOf(
-            CompanySummary("city", "City Taxi", TariffSummary("2.4", "1.2", "0.35")),
-            CompanySummary("night", "Night Cabs", TariffSummary("5", "2", "0.5")),
+            CompanySummary("city", "City Taxi", TariffSummary("2.4", "1.2", "0.35", "8")),
+            CompanySummary("night", "Night Cabs", TariffSummary("5", "2", "0.5", "5")),
         ),
         selectedCompanyId = "city",
     )

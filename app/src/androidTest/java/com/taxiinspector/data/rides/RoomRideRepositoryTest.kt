@@ -131,7 +131,11 @@ class RoomRideRepositoryTest {
         saveCompany("City Taxi", tariff("1", "2", "3"))
         val running = repository.startRide("interrupted", 1_000)
         repository.updateActiveRide(
-            running.copy(distanceMeters = BigDecimal("250"), timeTariffMillis = 42_000),
+            running.copy(
+                distanceMeters = BigDecimal("250"),
+                travelledDistanceMeters = BigDecimal("250"),
+                timeTariffMillis = 42_000,
+            ),
         )
 
         val interrupted = requireNotNull(repository.markRunningRideInterrupted("interrupted"))
@@ -160,6 +164,7 @@ class RoomRideRepositoryTest {
             phase = RidePhase.Paused,
             trackingStatus = TrackingStatus.Weak,
             distanceMeters = BigDecimal("123.450"),
+            travelledDistanceMeters = BigDecimal("123.450"),
             timeTariffMillis = 6_789,
             provisionalTimeMillis = 1_211,
             motionState = MotionState.Idle,
@@ -300,6 +305,7 @@ class RoomRideRepositoryTest {
         initialTax = amount(initial),
         perKmRate = amount(distance),
         perMinuteStillRate = amount(waiting),
+        waitingCrossoverKilometersPerHour = amount("8"),
     )
 
     private fun amount(value: String): DecimalAmount = DecimalAmount.of(BigDecimal(value))

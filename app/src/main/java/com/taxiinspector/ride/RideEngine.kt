@@ -7,11 +7,15 @@ import kotlin.math.min
  * Pure active-ride reducer. Android adapters decide how samples arrive; this class decides
  * whether a sample may affect distance, tariff time, or visible status.
  *
- * Billing follows EU taximeter calculation mode S. Each closed interval between two billing
- * quality fixes is attributed whole, to whichever of the two tariffs earns more over it. That is
- * exactly mode S when the speed stays on one side of the tariff's cross-over within the
- * interval, and a lower bound otherwise, so the app reads at or below an approved meter. No
- * speed measurement and no hysteresis take part: the comparison is between two fares.
+ * Billing attributes each closed interval between two billing-quality fixes whole, to distance
+ * or to waiting time, by comparing its average speed to the locked tariff's own
+ * [Tariff.waitingCrossoverKilometersPerHour] — a fourth, user-edited component of the company
+ * profile, not one derived from the other three rates. This departs from EU taximeter
+ * calculation mode S as OIML R21 defines it, whose cross-over is tariff-derived; a stored,
+ * per-company value was chosen 2026-09-12 because the regulated crossover itself varies by
+ * jurisdiction (5 km/h in Bulgaria, up to 20 elsewhere), so no single formula or constant is
+ * right for every profile (see `project-memory.md`). No speed measurement or hysteresis takes
+ * part in billing: the comparison is exact, between a chord and the tariff's own crossover.
  *
  * A fix that cannot bill is a non-observation, not a boundary. The chord between two billing
  * quality fixes is a lower bound on the path whatever happened between them, so a Weak fix
@@ -35,6 +39,7 @@ object RideEngine {
     private const val OUTLIER_STREAK_LIMIT = 3
 
     private val LABEL_FALLBACK_METERS = BigDecimal.valueOf(BILLING_ACCURACY_METERS)
+    private val SECONDS_PER_HOUR: BigDecimal = BigDecimal.valueOf(3_600)
 
     /** Which tariff wins a closed interval. */
     enum class Attribution { Distance, Time }
@@ -50,6 +55,7 @@ object RideEngine {
         phase = RidePhase.Running,
         trackingStatus = TrackingStatus.Searching,
         distanceMeters = BigDecimal.ZERO,
+        travelledDistanceMeters = BigDecimal.ZERO,
         timeTariffMillis = 0,
         provisionalTimeMillis = 0,
         motionState = MotionState.Idle,
@@ -80,6 +86,7 @@ object RideEngine {
             tariff = ride.tariff,
             total = FareCalculator.total(ride.tariff, ride.distanceMeters, ride.billedTimeMillis),
             distanceMeters = ride.distanceMeters,
+            travelledDistanceMeters = ride.travelledDistanceMeters,
             timeTariffMillis = ride.billedTimeMillis,
             elapsedMillis = endedElapsedMillis - ride.startedElapsedMillis,
             endedElapsedMillis = endedElapsedMillis,
@@ -118,19 +125,25 @@ object RideEngine {
         "maxPlausibleSpeed" to MAX_PLAUSIBLE_SPEED.toString(),
         "speedMargin" to SPEED_MARGIN.toString(),
         "outlierStreakLimit" to OUTLIER_STREAK_LIMIT.toString(),
-        "fareModel" to "modeS-perClosedInterval",
+        "fareModel" to "perCompanyCrossover-perClosedInterval",
     )
 
     /**
-     * Mode S over one closed interval: the tariff that earns more takes the whole interval.
-     * An exact tie goes to distance, which is the direction a meter switches at its cross-over.
+     * One closed interval, one tariff: distance wins once the average speed over it clears the
+     * locked tariff's own waiting crossover; time wins otherwise. An exact tie goes to distance,
+     * matching the direction a meter switches at its cross-over.
      */
     internal fun reconcile(tariff: Tariff, meters: BigDecimal, millis: Long): Attribution =
-        if (FareCalculator.compareDistanceToTimeFare(tariff, meters, millis) >= 0) {
-            Attribution.Distance
-        } else {
-            Attribution.Time
-        }
+        if (clearsWaitingCrossover(tariff, meters, millis)) Attribution.Distance else Attribution.Time
+
+    /**
+     * Cross-multiplied instead of divided, for the same exactness reason as
+     * [FareCalculator.compareDistanceToTimeFare]: km/h = metres × 3600 / (1000 × millis), so
+     * comparing to the tariff's crossover needs only `metres × 3600` against `kmh × millis`.
+     */
+    private fun clearsWaitingCrossover(tariff: Tariff, meters: BigDecimal, millis: Long): Boolean =
+        meters.multiply(SECONDS_PER_HOUR) >=
+            tariff.waitingCrossoverKilometersPerHour.value.multiply(BigDecimal.valueOf(millis))
 
     private fun onLocation(
         ride: ActiveRide,
@@ -218,11 +231,11 @@ object RideEngine {
                     outlierStreak = 0,
                     provisionalTimeMillis = baselineAgeMillis,
                     motionState = labelOnHold(
+                        current.tariff,
                         current.motionState,
                         baselineAgeMillis,
                         significantMeters,
                         sample,
-                        current.tariff,
                     ),
                 ),
                 RideDecision(
@@ -240,6 +253,8 @@ object RideEngine {
             Attribution.Distance -> Step(
                 current.accepted().copy(
                     distanceMeters = current.distanceMeters.add(BigDecimal.valueOf(chordMeters)),
+                    travelledDistanceMeters =
+                        current.travelledDistanceMeters.add(BigDecimal.valueOf(chordMeters)),
                     provisionalTimeMillis = 0,
                     lastBillablePoint = sample,
                     lastAcceptedFix = sample,
@@ -260,12 +275,14 @@ object RideEngine {
             Attribution.Time -> Step(
                 current.accepted().copy(
                     timeTariffMillis = current.timeTariffMillis + baselineAgeMillis,
+                    travelledDistanceMeters =
+                        current.travelledDistanceMeters.add(BigDecimal.valueOf(chordMeters)),
                     provisionalTimeMillis = 0,
                     lastBillablePoint = sample,
                     lastAcceptedFix = sample,
                     pendingOutlier = null,
                     outlierStreak = 0,
-                    motionState = labelOnTimeClose(acceptedFix, sample, current.tariff),
+                    motionState = labelOnTimeClose(current.tariff, acceptedFix, sample),
                 ),
                 RideDecision(
                     reason = RideDecision.Reason.ClosedTime,
@@ -345,11 +362,11 @@ object RideEngine {
         val label = if (
             baseline != null &&
             ride.motionState == MotionState.Moving &&
-            FareCalculator.compareDistanceToTimeFare(
+            !clearsWaitingCrossover(
                 ride.tariff,
                 LABEL_FALLBACK_METERS,
                 (nowElapsedMillis - baseline.fixElapsedMillis).coerceAtLeast(0),
-            ) < 0
+            )
         ) {
             MotionState.Idle
         } else {
@@ -462,28 +479,29 @@ object RideEngine {
 
     /**
      * A hold proves only that the average speed stayed under the deadband over the interval, so
-     * once the time tariff would out-earn the whole deadband the vehicle cannot be above the
-     * cross-over. A trusted Doppler speed answers sooner, in either direction.
+     * once the deadband's own width would already be too slow to clear the waiting crossover in
+     * the time elapsed, the vehicle cannot be above it either. A trusted Doppler speed answers
+     * sooner, in either direction.
      */
     private fun labelOnHold(
+        tariff: Tariff,
         current: MotionState,
         baselineAgeMillis: Long,
         significantMeters: Double,
         sample: LocationSample,
-        tariff: Tariff,
     ): MotionState {
-        val crossover = tariff.crossoverSpeedMetersPerSecond
+        val crossover = tariff.waitingCrossoverMetersPerSecond
         val speed = sample.speedMetersPerSecond
         val speedAccuracy = sample.speedAccuracyMetersPerSecond
         val confidentlyAbove = speed != null && speedAccuracy != null &&
             speed - speedAccuracy >= crossover
         val confidentlyBelow = speed != null && speedAccuracy != null &&
             speed + speedAccuracy < crossover
-        val deadbandOutEarned = FareCalculator.compareDistanceToTimeFare(
+        val deadbandOutEarned = !clearsWaitingCrossover(
             tariff,
             BigDecimal.valueOf(significantMeters),
             baselineAgeMillis,
-        ) < 0
+        )
 
         return when {
             confidentlyAbove -> MotionState.Moving
@@ -498,14 +516,14 @@ object RideEngine {
      * a car that has just pulled away correctly.
      */
     private fun labelOnTimeClose(
+        tariff: Tariff,
         previousFix: LocationSample,
         sample: LocationSample,
-        tariff: Tariff,
     ): MotionState {
         val seconds = (sample.fixElapsedMillis - previousFix.fixElapsedMillis) / 1_000.0
         if (seconds <= 0.0) return MotionState.Idle
         val speed = Geodesic.distanceMeters(previousFix, sample) / seconds
-        return if (speed >= tariff.crossoverSpeedMetersPerSecond) {
+        return if (speed >= tariff.waitingCrossoverMetersPerSecond) {
             MotionState.Moving
         } else {
             MotionState.Idle
@@ -518,10 +536,10 @@ object RideEngine {
      * end of the segment, and a baseline restored from persistence comes back as Unknown.
      *
      * Since the deadband now spends both endpoints' accuracy, this floor only decides anything
-     * once their sum is under 2.5 m, which a phone does not reach. Under mode S that costs
-     * little: the floor existed to stop slow city travel being measured as straight chords
-     * across curves, and slow travel now bills time rather than distance. Whether to keep the
-     * floor at all is a Phase 8.3 question for the field trace.
+     * once their sum is under 2.5 m, which a phone does not reach. It matters more on a company
+     * with a low configured crossover, since more slow travel then bills as distance instead of
+     * time, and a straight-line chord corner-cuts a curve most exactly at low speed. Whether to
+     * tighten it is a Phase 8.3 question for the field trace.
      */
     private fun significantMovementFloorMeters(
         baseline: LocationSample,

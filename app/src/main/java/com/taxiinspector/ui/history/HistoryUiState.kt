@@ -39,6 +39,8 @@ data class RideDetailPresentation(
     val endedAt: String,
     val total: String,
     val distanceKilometres: String,
+    /** Null for a ride saved before this was recorded; the screen shows it as unrecorded. */
+    val travelledDistanceKilometres: String?,
     val waitTime: String,
     val elapsedTime: String,
     val initialTax: String,

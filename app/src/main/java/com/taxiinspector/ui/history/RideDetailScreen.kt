@@ -100,6 +100,12 @@ private fun RideDetails(
         stringResource(R.string.ride_detail_distance),
         stringResource(R.string.ride_detail_distance_value, ride.distanceKilometres),
     )
+    DetailRow(
+        stringResource(R.string.ride_detail_travelled_distance),
+        ride.travelledDistanceKilometres?.let {
+            stringResource(R.string.ride_detail_distance_value, it)
+        } ?: stringResource(R.string.ride_detail_travelled_distance_unrecorded),
+    )
     DetailRow(stringResource(R.string.ride_detail_wait), ride.waitTime)
     DetailRow(stringResource(R.string.ride_detail_elapsed), ride.elapsedTime)
 

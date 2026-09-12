@@ -12,6 +12,7 @@ class FareCalculatorTest {
         initialTax = DecimalAmount.parse("2.40")!!,
         perKmRate = DecimalAmount.parse("1.20")!!,
         perMinuteStillRate = DecimalAmount.parse("0.35")!!,
+        waitingCrossoverKilometersPerHour = DecimalAmount.parse("8")!!,
     )
 
     @Test

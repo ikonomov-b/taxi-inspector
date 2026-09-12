@@ -26,8 +26,8 @@ data class TraceMeta(
         appendLine("""  "perKmRate": ${tariff.perKmRate.value.toPlainString().json()},""")
         appendLine("""  "perMinuteStillRate": ${tariff.perMinuteStillRate.value.toPlainString().json()},""")
         appendLine(
-            """  "crossoverSpeedMetersPerSecond": """ +
-                String.format(Locale.ROOT, "%.6f", tariff.crossoverSpeedMetersPerSecond) + ",",
+            """  "waitingCrossoverKilometersPerHour": """ +
+                tariff.waitingCrossoverKilometersPerHour.value.toPlainString().json() + ",",
         )
         appendLine("""  "appVersionName": ${appVersionName.json()},""")
         appendLine("""  "deviceModel": ${deviceModel.json()},""")

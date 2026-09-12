@@ -79,7 +79,7 @@ class TariffScreenTest {
 
         composeRule
             .onNodeWithText(
-                "Enter all three values in the same unit the taxi uses. Taxi Inspector stores no currency and never converts between currencies.",
+                "Enter every rate in the same unit the taxi uses. Taxi Inspector stores no currency and never converts between currencies.",
             )
             .performScrollTo()
             .assertIsDisplayed()
@@ -89,7 +89,7 @@ class TariffScreenTest {
     fun everyFieldAndSaveIsDisabledWhileARideHoldsALockedTariff() {
         render(
             TariffUiState(
-                savedTariff = TariffSummary("2.4", "1.2", "0.35"),
+                savedTariff = TariffSummary("2.4", "1.2", "0.35", "8"),
                 isLocked = true,
             ),
         )
@@ -115,7 +115,7 @@ class TariffScreenTest {
     fun editingAnExistingTariffCanBeCancelled() {
         var cancelled = false
         render(
-            TariffUiState(savedTariff = TariffSummary("2.4", "1.2", "0.35")),
+            TariffUiState(savedTariff = TariffSummary("2.4", "1.2", "0.35", "8")),
             onCancel = { cancelled = true },
         )
 

@@ -391,6 +391,7 @@ class RideTrackingControllerTest {
         initialTax = amount("1.25"),
         perKmRate = amount("2.50"),
         perMinuteStillRate = amount("0.75"),
+        waitingCrossoverKilometersPerHour = amount("8"),
     )
 
     private fun amount(value: String): DecimalAmount = DecimalAmount.of(BigDecimal(value))

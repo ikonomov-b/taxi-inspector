@@ -15,6 +15,13 @@ import java.math.BigDecimal
  * [lastBillablePoint] was set, measured on the fix clock, which the next closed interval either
  * replaces with its own attribution or commits. [billedTimeMillis] is their sum and the only
  * time figure a fare, a notification or a summary may read.
+ *
+ * [distanceMeters] is what is billed at the per-km rate. [travelledDistanceMeters] is every
+ * closed interval's chord regardless of which tariff won it, so it also includes distance a slow
+ * interval redirected to waiting time; it is a lower bound on the physical path, since a chord
+ * cuts corners and a held (sub-deadband) interval contributes nothing to either. It commits only
+ * when an interval closes, never while a chord is still inside the noise deadband, so it cannot
+ * publish GPS jitter as movement.
  */
 data class ActiveRide(
     val id: String,
@@ -23,6 +30,7 @@ data class ActiveRide(
     val phase: RidePhase,
     val trackingStatus: TrackingStatus,
     val distanceMeters: BigDecimal,
+    val travelledDistanceMeters: BigDecimal,
     val timeTariffMillis: Long,
     val provisionalTimeMillis: Long,
     val motionState: MotionState,
@@ -43,6 +51,9 @@ data class ActiveRide(
             "A locked company name cannot be blank."
         }
         require(distanceMeters.signum() >= 0) { "Distance cannot be negative." }
+        require(travelledDistanceMeters >= distanceMeters) {
+            "Travelled distance cannot be less than what was billed as distance."
+        }
         require(timeTariffMillis >= 0) { "Committed tariff time cannot be negative." }
         require(provisionalTimeMillis >= 0) { "Provisional tariff time cannot be negative." }
         require(lastBillablePoint != null || provisionalTimeMillis == 0L) {

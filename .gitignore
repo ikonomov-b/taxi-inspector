@@ -11,3 +11,7 @@ __pycache__/
 # scripts/pull-traces.sh writes here by default. Root-anchored: the script always writes
 # repo-root-relative, so a checked-in trace fixture under test resources stays addable.
 /traces/
+
+# Reference GPX exports pulled from Locus Map for field-validation comparisons (see
+# docs/field-validation.md). Same reason as /traces/: real trip coordinates, not source.
+/*.gpx

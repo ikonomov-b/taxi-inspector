@@ -59,6 +59,7 @@ class RideTrackingServiceTest {
                 DecimalAmount.of(BigDecimal("1.25")),
                 DecimalAmount.of(BigDecimal("2.50")),
                 DecimalAmount.of(BigDecimal("0.75")),
+                DecimalAmount.of(BigDecimal("8")),
             ),
         )
         shell("cmd location set-location-enabled true")

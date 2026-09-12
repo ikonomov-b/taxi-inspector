@@ -10,7 +10,7 @@ import androidx.room.RoomDatabase
         ActiveRideEntity::class,
         RideSummaryEntity::class,
     ],
-    version = 2,
+    version = 3,
     exportSchema = true,
 )
 abstract class TaxiInspectorDatabase : RoomDatabase() {

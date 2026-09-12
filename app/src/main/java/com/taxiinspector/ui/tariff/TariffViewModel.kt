@@ -101,6 +101,10 @@ class TariffViewModel(private val repository: RoomRideRepository) : ViewModel() 
             initialTax = requireNotNull(parsed[TariffField.InitialTax]),
             perKmRate = requireNotNull(parsed[TariffField.PerKmRate]),
             perMinuteStillRate = requireNotNull(parsed[TariffField.PerMinuteStillRate]),
+            // This parked, unwired variant has no field for it; see project-memory.md.
+            waitingCrossoverKilometersPerHour = requireNotNull(
+                DecimalAmount.parse(Tariff.DEFAULT_WAITING_CROSSOVER_KILOMETERS_PER_HOUR),
+            ),
         )
         viewModelScope.launch {
             // A ride may have started between the check above and this write.

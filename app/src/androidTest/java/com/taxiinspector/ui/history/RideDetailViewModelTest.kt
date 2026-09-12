@@ -136,6 +136,7 @@ class RideDetailViewModelTest {
         useCompany(tariff())
         val active = repository.startRide(id, 1_000).copy(
             distanceMeters = BigDecimal("2500"),
+            travelledDistanceMeters = BigDecimal("2500"),
             timeTariffMillis = 180_000,
         )
         repository.finishCompleted(
@@ -153,6 +154,7 @@ class RideDetailViewModelTest {
         initialTax = requireNotNull(DecimalAmount.parse("2.4")),
         perKmRate = requireNotNull(DecimalAmount.parse("1.2")),
         perMinuteStillRate = requireNotNull(DecimalAmount.parse("0.35")),
+        waitingCrossoverKilometersPerHour = requireNotNull(DecimalAmount.parse("8")),
     )
 
     private fun formatter() = RideHistoryFormatter(Locale.US, TimeZone.getTimeZone("UTC"))

@@ -64,14 +64,17 @@
     <string name="tariff_per_minute">Per minute car-still rate</string>
     <string name="tariff_save">Save tariff</string>
     <string name="tariff_locked">Tariff editing is locked while a ride is active.</string>
-    <string name="tariff_unit_notice">Enter all three values in the same unit the taxi uses. Taxi Inspector stores no currency and never converts between currencies.</string>
-    <string name="tariff_summary">Initial %1$s · %2$s/km · %3$s/min</string>
+    <string name="tariff_unit_notice">Enter every rate in the same unit the taxi uses. Taxi Inspector stores no currency and never converts between currencies.</string>
+    <string name="tariff_summary">Initial %1$s · %2$s/km · %3$s/min · wait below %4$s km/h</string>
     <string name="tariff_invalid_field">Enter a non-negative number with at most one decimal separator and six decimals.</string>
+    <string name="company_waiting_crossover">Waiting speed (km/h)</string>
+    <string name="company_waiting_crossover_notice">Below this speed the ride bills as waiting time instead of distance.</string>
+    <string name="company_waiting_crossover_range">Enter a speed above 0 and at most 30 km/h.</string>
 
     <!-- Taxi companies -->
     <string name="companies_title">Taxi companies</string>
     <string name="companies_empty">No taxi companies saved</string>
-    <string name="companies_empty_detail">Save a company and its three rates before starting a ride.</string>
+    <string name="companies_empty_detail">Save a company and its rates before starting a ride.</string>
     <string name="companies_add">Add company</string>
     <string name="companies_edit">Edit</string>
     <string name="companies_delete">Delete</string>
@@ -84,7 +87,7 @@
     <!-- Company editor -->
     <string name="company_editor_add_title">Add taxi company</string>
     <string name="company_editor_edit_title">Edit taxi company</string>
-    <string name="company_editor_first_run_intro">Name the taxi company and enter its three rates before starting a ride.</string>
+    <string name="company_editor_first_run_intro">Name the taxi company and enter its rates before starting a ride.</string>
     <string name="company_editor_intro">A company may be changed only between rides.</string>
     <string name="company_name">Company name</string>
     <string name="company_name_blank">Enter a company name.</string>
@@ -120,7 +123,9 @@
     <string name="ride_detail_ended">Ended</string>
     <string name="ride_detail_status">Status</string>
     <string name="ride_detail_total">Final total</string>
-    <string name="ride_detail_distance">Distance</string>
+    <string name="ride_detail_distance">Billed distance</string>
+    <string name="ride_detail_travelled_distance">Distance travelled</string>
+    <string name="ride_detail_travelled_distance_unrecorded">Not recorded</string>
     <string name="ride_detail_wait">Wait time</string>
     <string name="ride_detail_elapsed">Elapsed ride time</string>
     <string name="ride_detail_company">Taxi company</string>

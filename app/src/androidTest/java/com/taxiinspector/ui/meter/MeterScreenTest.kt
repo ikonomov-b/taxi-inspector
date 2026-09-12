@@ -134,10 +134,10 @@ class MeterScreenTest {
 
     @Test
     fun aRideLockedBeforeCompaniesExistedIsLabelledRatherThanNamed() {
-        render(runningState().copy(company = MeterCompany(null, TariffSummary("2.4", "1.2", "0.35"))))
+        render(runningState().copy(company = MeterCompany(null, TariffSummary("2.4", "1.2", "0.35", "8"))))
 
         composeRule.onNodeWithText("Company not recorded").performScrollTo().assertIsDisplayed()
-        composeRule.onNodeWithText("Initial 2.4 · 1.2/km · 0.35/min")
+        composeRule.onNodeWithText("Initial 2.4 · 1.2/km · 0.35/min · wait below 8 km/h")
             .performScrollTo()
             .assertIsDisplayed()
     }
@@ -147,7 +147,7 @@ class MeterScreenTest {
         render(readyState())
 
         composeRule.onNodeWithText("City Taxi").performScrollTo().assertIsDisplayed()
-        composeRule.onNodeWithText("Initial 2.4 · 1.2/km · 0.35/min")
+        composeRule.onNodeWithText("Initial 2.4 · 1.2/km · 0.35/min · wait below 8 km/h")
             .performScrollTo()
             .assertIsDisplayed()
         composeRule.onNodeWithText("Manage companies")
@@ -163,8 +163,8 @@ class MeterScreenTest {
             readyState().copy(
                 isCompanySelectorVisible = true,
                 companies = listOf(
-                    CompanySummary("city", "City Taxi", TariffSummary("2.4", "1.2", "0.35")),
-                    CompanySummary("night", "Night Cabs", TariffSummary("5", "2", "0.5")),
+                    CompanySummary("city", "City Taxi", TariffSummary("2.4", "1.2", "0.35", "8")),
+                    CompanySummary("night", "Night Cabs", TariffSummary("5", "2", "0.5", "8")),
                 ),
                 selectedCompanyId = "city",
             ),
@@ -172,7 +172,7 @@ class MeterScreenTest {
 
         // Enough tariff detail to tell two companies apart, merged into one option.
         composeRule
-            .onNode(hasText("Night Cabs") and hasText("Initial 5 · 2/km · 0.5/min"))
+            .onNode(hasText("Night Cabs") and hasText("Initial 5 · 2/km · 0.5/min · wait below 8 km/h"))
             .assertExists()
             .performClick()
 
@@ -232,9 +232,9 @@ class MeterScreenTest {
     }
 
     private fun readyState() = MeterUiState(
-        company = MeterCompany("City Taxi", TariffSummary("2.4", "1.2", "0.35")),
+        company = MeterCompany("City Taxi", TariffSummary("2.4", "1.2", "0.35", "8")),
         companies = listOf(
-            CompanySummary("city", "City Taxi", TariffSummary("2.4", "1.2", "0.35")),
+            CompanySummary("city", "City Taxi", TariffSummary("2.4", "1.2", "0.35", "8")),
         ),
         selectedCompanyId = "city",
         status = MeterStatus.ReadyToStart,
