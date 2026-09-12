@@ -98,6 +98,16 @@ scripts/pull-traces.sh
 scripts/compare_tracks.py traces/<rideId>/decisions.csv locus-export.gpx --per-minute
 ```
 
+6. **Before reading anything else the script says, check the `reference interval` line it prints.**
+   Configuring step 1's 1 s interval does not guarantee Locus held it — throttling, a paused
+   recording, or the wrong profile can all still produce a coarser track. If the median is above
+   1.5 s, or the script prints its own warning, the exported track is smoothed rather than raw:
+   every ratio below understates what the app actually missed, and the run is not usable evidence.
+   Check which Locus setting was actually in effect and redo the drive rather than keeping the
+   numbers with a caveat — three drives before this check existed (`build-status.md` risk 8c) were
+   all recorded at a 2–3 s median interval despite step 1, and their ratios are optimistic because
+   of it.
+
 The script reports the app's raw fix-to-fix path, what it billed, the reference path over the same
 time window, and a reason histogram attributing every fix the engine did not bill as distance.
 
