@@ -172,11 +172,24 @@ def main(argv=None):
     reference_points = []
     if args.reference:
         reference_points = read_reference_track(args.reference)
+        in_window = [millis for millis, _, _ in reference_points
+                     if first_millis <= millis <= last_millis]
         overlap = raw_distance(reference_points, first_millis, last_millis)
-        print(f"reference points       {len(reference_points)}")
+        print(f"reference points       {len(reference_points)}   ({len(in_window)} in this ride's window)")
         print(f"reference raw path     {overlap:9.0f} m   (same time window)")
         if overlap:
             print(f"billed / reference     {billed_distance / overlap:9.2%}")
+        if len(in_window) > 1:
+            gaps = sorted(b - a for a, b in zip(in_window, in_window[1:]))
+            median_gap = gaps[len(gaps) // 2] / 1000
+            print(f"reference interval     {gaps[0] / 1000:6.1f} / {median_gap:.1f} / {gaps[-1] / 1000:.1f} s  (min/median/max)")
+            if median_gap > 1.5:
+                # field-validation.md calls for a 1 s interval, 0 m filter, accuracy filter off.
+                # A coarser recording straightens curves and corners, understating the true
+                # path -- so a ratio against it reads better than the app actually earned.
+                print("  WARNING: median interval is well above the documented 1 s setting -- "
+                      "this reference track is smoothed, not raw, and the ratio above is "
+                      "optimistic")
         # The reference over-reads while stationary because it sums raw jitter with no
         # deadband at all, so the two only compare fairly over intervals that moved.
 
